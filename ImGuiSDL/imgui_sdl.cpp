@@ -106,11 +106,11 @@ namespace ImGuiSDL
 		Width = width;
 		Height = height;
 
-		for (auto& pair : CacheTextures)
+		for (auto& pair : UniformColorTriangleCache)
 		{
-			SDL_DestroyTexture(pair.second);
+			SDL_DestroyTexture(pair.second.Texture);
 		}
-		CacheTextures.clear();
+		UniformColorTriangleCache.clear();
 	}
 
 	void Target::SetClipRect(const ClipRect& rect)
@@ -173,27 +173,44 @@ namespace ImGuiSDL
 		};
 	}
 
-	void DrawTriangleWithColorFunction(Target& target, const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const std::function<Color(double x, double y)>& colorFunction)
+	struct FixedPointTriangleRenderInfo
+	{
+		int X1, X2, X3, Y1, Y2, Y3;
+		int MinX, MaxX, MinY, MaxY;
+	};
+
+	FixedPointTriangleRenderInfo CalculateFixedPointTriangleInfo(const ImVec2& v1, const ImVec2& v2, const ImVec2& v3)
+	{
+		static constexpr float scale = 16.0f;
+
+		const int x1 = static_cast<int>(round(v1.x * scale));
+		const int x2 = static_cast<int>(round(v2.x * scale));
+		const int x3 = static_cast<int>(round(v3.x * scale));
+
+		const int y1 = static_cast<int>(round(v1.y * scale));
+		const int y2 = static_cast<int>(round(v2.y * scale));
+		const int y3 = static_cast<int>(round(v3.y * scale));
+
+		int minx = (Min3(x1, x2, x3) + 0xF) >> 4;
+		int maxx = (Max3(x1, x2, x3) + 0xF) >> 4;
+		int miny = (Min3(y1, y2, y3) + 0xF) >> 4;
+		int maxy = (Max3(y1, y2, y3) + 0xF) >> 4;
+
+		return FixedPointTriangleRenderInfo{ x1, x2, x3, y1, y2, y3, minx, maxx, miny, maxy };
+	}
+
+	Target::TriangleCacheItem DrawTriangleWithColorFunction(Target& target, const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const FixedPointTriangleRenderInfo& renderInfo, const std::function<Color(double x, double y)>& colorFunction)
 	{
 		// RIPPED OFF FROM https://web.archive.org/web/20171128164608/http://forum.devmaster.net/t/advanced-rasterization/6145.
 		// This is a fixed point imlementation that rounds to top-left.
 
-		static constexpr float scale = 16.0f;
-		const int y1 = static_cast<int>(round(v1.pos.y * scale));
-		const int y2 = static_cast<int>(round(v2.pos.y * scale));
-		const int y3 = static_cast<int>(round(v3.pos.y * scale));
+		const int deltaX12 = renderInfo.X1 - renderInfo.X2;
+		const int deltaX23 = renderInfo.X2 - renderInfo.X3;
+		const int deltaX31 = renderInfo.X3 - renderInfo.X1;
 
-		const int x1 = static_cast<int>(round(v1.pos.x * scale));
-		const int x2 = static_cast<int>(round(v2.pos.x * scale));
-		const int x3 = static_cast<int>(round(v3.pos.x * scale));
-
-		const int deltaX12 = x1 - x2;
-		const int deltaX23 = x2 - x3;
-		const int deltaX31 = x3 - x1;
-
-		const int deltaY12 = y1 - y2;
-		const int deltaY23 = y2 - y3;
-		const int deltaY31 = y3 - y1;
+		const int deltaY12 = renderInfo.Y1 - renderInfo.Y2;
+		const int deltaY23 = renderInfo.Y2 - renderInfo.Y3;
+		const int deltaY31 = renderInfo.Y3 - renderInfo.Y1;
 
 		const int fixedDeltaX12 = deltaX12 << 4;
 		const int fixedDeltaX23 = deltaX23 << 4;
@@ -203,34 +220,35 @@ namespace ImGuiSDL
 		const int fixedDeltaY23 = deltaY23 << 4;
 		const int fixedDeltaY31 = deltaY31 << 4;
 
-		int minx = (Min3(x1, x2, x3) + 0xF) >> 4;
-		int maxx = (Max3(x1, x2, x3) + 0xF) >> 4;
-		int miny = (Min3(y1, y2, y3) + 0xF) >> 4;
-		int maxy = (Max3(y1, y2, y3) + 0xF) >> 4;
+		if (renderInfo.MaxX - renderInfo.MinX == 0 || renderInfo.MaxY - renderInfo.MinY == 0) return Target::TriangleCacheItem{ nullptr };
 
-		int c1 = deltaY12 * x1 - deltaX12 * y1;
-		int c2 = deltaY23 * x2 - deltaX23 * y2;
-		int c3 = deltaY31 * x3 - deltaX31 * y3;
+		int c1 = deltaY12 * renderInfo.X1 - deltaX12 * renderInfo.Y1;
+		int c2 = deltaY23 * renderInfo.X2 - deltaX23 * renderInfo.Y2;
+		int c3 = deltaY31 * renderInfo.X3 - deltaX31 * renderInfo.Y3;
 
 		if (deltaY12 < 0 || (deltaY12 == 0 && deltaX12 > 0)) c1++;
 		if (deltaY23 < 0 || (deltaY23 == 0 && deltaX23 > 0)) c2++;
 		if (deltaY31 < 0 || (deltaY31 == 0 && deltaX31 > 0)) c3++;
 
-		int cY1 = c1 + deltaX12 * (miny << 4) - deltaY12 * (minx << 4);
-		int cY2 = c2 + deltaX23 * (miny << 4) - deltaY23 * (minx << 4);
-		int cY3 = c3 + deltaX31 * (miny << 4) - deltaY31 * (minx << 4);
+		int cY1 = c1 + deltaX12 * (renderInfo.MinY << 4) - deltaY12 * (renderInfo.MinX << 4);
+		int cY2 = c2 + deltaX23 * (renderInfo.MinY << 4) - deltaY23 * (renderInfo.MinX << 4);
+		int cY3 = c3 + deltaX31 * (renderInfo.MinY << 4) - deltaY31 * (renderInfo.MinX << 4);
 
-		for (int y = miny; y < maxy; y++)
+		SDL_Texture* cache = target.MakeTexture(renderInfo.MaxX - renderInfo.MinX, renderInfo.MaxY - renderInfo.MinY);
+		target.DisableClip();
+		target.UseAsRenderTarget(cache);
+
+		for (int y = renderInfo.MinY; y < renderInfo.MaxY; y++)
 		{
 			int cX1 = cY1;
 			int cX2 = cY2;
 			int cX3 = cY3;
 
-			for (int x = minx; x < maxx; x++)
+			for (int x = renderInfo.MinX; x < renderInfo.MaxX; x++)
 			{
 				if (cX1 > 0 && cX2 > 0 && cX3 > 0)
 				{
-					target.SetAt(x, y, colorFunction(x + 0.5, y + 0.5));
+					target.SetAt(x - renderInfo.MinX, y - renderInfo.MinY, colorFunction(x + 0.5, y + 0.5));
 				}
 
 				cX1 -= fixedDeltaY12;
@@ -242,6 +260,11 @@ namespace ImGuiSDL
 			cY2 += fixedDeltaX23;
 			cY3 += fixedDeltaX31;
 		}
+
+		target.UseAsRenderTarget(nullptr);
+		target.EnableClip();
+
+		return Target::TriangleCacheItem{ cache, renderInfo.MinX, renderInfo.MinY, renderInfo.MaxX - renderInfo.MinX, renderInfo.MaxY - renderInfo.MinY };
 	}
 
 	void DrawTriangle(Target& target, const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const Texture* texture, const Rect& bounding)
@@ -258,8 +281,10 @@ namespace ImGuiSDL
 		const InterpolatedFactorEquation shadeB(color0.B, color1.B, color2.B, v1.pos, v2.pos, v3.pos);
 		const InterpolatedFactorEquation shadeA(color0.A, color1.A, color2.A, v1.pos, v2.pos, v3.pos);
 
+		const auto& renderInfo = CalculateFixedPointTriangleInfo(v3.pos, v2.pos, v1.pos);
+
 		// The naming inconsistency in the parameters is intentional. The fixed point algorithm wants the vertices in a counter clockwise order.
-		DrawTriangleWithColorFunction(target, v3, v2, v1, [&](double x, double y) {
+		const auto& cached = DrawTriangleWithColorFunction(target, v3, v2, v1, renderInfo, [&](double x, double y) {
 			const double u = textureU.Evaluate(x, y);
 			const double v = textureV.Evaluate(x, y);
 			const Color sampled = texture->Sample(u, v);
@@ -267,14 +292,42 @@ namespace ImGuiSDL
 
 			return sampled * shade;
 		});
+
+		if (!cached.Texture) return;
+
+		const SDL_Rect destination = { cached.X, cached.Y, cached.Width, cached.Height };
+		SDL_RenderCopy(target.Renderer, cached.Texture, nullptr, &destination);
 	}
 
 	void DrawUniformColorTriangle(Target& target, const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3)
 	{
 		const Color color(v1.col);
 
+		const auto& renderInfo = CalculateFixedPointTriangleInfo(v3.pos, v2.pos, v1.pos);
+
+		const auto key = std::make_tuple(v1.col, 
+			static_cast<int>(round(v1.pos.x)) - renderInfo.MinX, static_cast<int>(round(v1.pos.y)) - renderInfo.MinY,
+			static_cast<int>(round(v2.pos.x)) - renderInfo.MinX, static_cast<int>(round(v2.pos.y)) - renderInfo.MinY,
+			static_cast<int>(round(v3.pos.x)) - renderInfo.MinX, static_cast<int>(round(v3.pos.y)) - renderInfo.MinY);
+		if (target.UniformColorTriangleCache.count(key) > 0)
+		{
+			const auto& cacheItem = target.UniformColorTriangleCache.at(key);
+
+			const SDL_Rect destination = { renderInfo.MinX, renderInfo.MinY, cacheItem.Width, cacheItem.Height };
+			SDL_RenderCopy(target.Renderer, cacheItem.Texture, nullptr, &destination);
+
+			return;
+		}
+
 		// The naming inconsistency in the parameters is intentional. The fixed point algorithm wants the vertices in a counter clockwise order.
-		DrawTriangleWithColorFunction(target, v3, v2, v1, [&color](double, double) { return color; });
+		const auto& cached = DrawTriangleWithColorFunction(target, v3, v2, v1, renderInfo, [&color](double, double) { return color; });
+
+		if (!cached.Texture) return;
+
+		const SDL_Rect destination = { cached.X, cached.Y, cached.Width, cached.Height };
+		SDL_RenderCopy(target.Renderer, cached.Texture, nullptr, &destination);
+
+		target.UniformColorTriangleCache[key] = cached;
 	}
 
 	void DrawRectangle(Target& target, const Rect& bounding, const Texture* texture, const Color& color)
