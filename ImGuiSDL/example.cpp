@@ -15,10 +15,12 @@ int main()
 	ImGuiIO& io = ImGui::GetIO();
 	io.DisplaySize.x = 800.0f;
 	io.DisplaySize.y = 600.0f;
+	// TODO: Create a style setting function into the namespace.
 	ImGui::GetStyle().WindowRounding = 0.0f;
 	ImGui::GetStyle().AntiAliasedFill = false;
 	ImGui::GetStyle().AntiAliasedLines = false;
 
+	// TODO: This should also happen in the helper library.
 	unsigned char* pixels;
 	int width, height;
 	io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
@@ -84,7 +86,7 @@ int main()
 
 		ImGui::ShowDemoWindow();
 
-		SDL_SetRenderDrawColor(renderer, 0, 0, 0, 0);
+		SDL_SetRenderDrawColor(renderer, 114, 144, 154, 255);
 		SDL_RenderClear(renderer);
 
 		ImGui::Render();

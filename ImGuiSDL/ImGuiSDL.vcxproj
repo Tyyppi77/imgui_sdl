@@ -169,6 +169,7 @@
     <ClCompile Include="..\imgui-1.61\imgui_draw.cpp" />
     <ClCompile Include="..\imgui-1.61\imgui_sw.cpp" />
     <ClCompile Include="example.cpp" />
+    <ClCompile Include="imgui_sdl.cpp" />
     <ClCompile Include="imgui_sdl.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

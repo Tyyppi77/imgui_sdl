@@ -43,5 +43,6 @@
     </ClCompile>
     <ClCompile Include="example.cpp" />
     <ClCompile Include="imgui_sdl.h" />
+    <ClCompile Include="imgui_sdl.cpp" />
   </ItemGroup>
 </Project>
