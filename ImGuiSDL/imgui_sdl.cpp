@@ -105,12 +105,6 @@ namespace ImGuiSDL
 	{
 		Width = width;
 		Height = height;
-
-		for (auto& pair : UniformColorTriangleCache)
-		{
-			SDL_DestroyTexture(pair.second.Texture);
-		}
-		UniformColorTriangleCache.clear();
 	}
 
 	void Target::SetClipRect(const ClipRect& rect)
@@ -267,8 +261,30 @@ namespace ImGuiSDL
 		return Target::TriangleCacheItem{ cache, renderInfo.MinX, renderInfo.MinY, renderInfo.MaxX - renderInfo.MinX, renderInfo.MaxY - renderInfo.MinY };
 	}
 
+	void DrawCachedTriangle(Target& target, const Target::TriangleCacheItem& triangle, const FixedPointTriangleRenderInfo& renderInfo)
+	{
+		const SDL_Rect destination = { renderInfo.MinX, renderInfo.MinY, triangle.Width, triangle.Height };
+		SDL_RenderCopy(target.Renderer, triangle.Texture, nullptr, &destination);
+	}
+
 	void DrawTriangle(Target& target, const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const Texture* texture, const Rect& bounding)
 	{
+		const auto& renderInfo = CalculateFixedPointTriangleInfo(v3.pos, v2.pos, v1.pos);
+
+		// First we check if there is a cached version of this triangle already waiting for us. If so, we can just do a super fast texture copy.
+
+		const auto key = std::make_tuple(
+			static_cast<int>(round(v1.pos.x)) - renderInfo.MinX, static_cast<int>(round(v1.pos.y)) - renderInfo.MinY, v1.uv.x, v1.uv.y, v1.col,
+			static_cast<int>(round(v2.pos.x)) - renderInfo.MinX, static_cast<int>(round(v2.pos.y)) - renderInfo.MinY, v2.uv.x, v2.uv.y, v2.col,
+			static_cast<int>(round(v3.pos.x)) - renderInfo.MinX, static_cast<int>(round(v3.pos.y)) - renderInfo.MinY, v3.uv.x, v3.uv.y, v3.col);
+
+		if (target.GenericTriangleCache.count(key) > 0)
+		{
+			DrawCachedTriangle(target, target.GenericTriangleCache.at(key), renderInfo);
+
+			return;
+		}
+
 		const Color color0 = Color(v1.col);
 		const Color color1 = Color(v2.col);
 		const Color color2 = Color(v3.col);
@@ -281,7 +297,6 @@ namespace ImGuiSDL
 		const InterpolatedFactorEquation shadeB(color0.B, color1.B, color2.B, v1.pos, v2.pos, v3.pos);
 		const InterpolatedFactorEquation shadeA(color0.A, color1.A, color2.A, v1.pos, v2.pos, v3.pos);
 
-		const auto& renderInfo = CalculateFixedPointTriangleInfo(v3.pos, v2.pos, v1.pos);
 
 		// The naming inconsistency in the parameters is intentional. The fixed point algorithm wants the vertices in a counter clockwise order.
 		const auto& cached = DrawTriangleWithColorFunction(target, v3, v2, v1, renderInfo, [&](double x, double y) {
@@ -297,6 +312,8 @@ namespace ImGuiSDL
 
 		const SDL_Rect destination = { cached.X, cached.Y, cached.Width, cached.Height };
 		SDL_RenderCopy(target.Renderer, cached.Texture, nullptr, &destination);
+
+		target.GenericTriangleCache[key] = cached;
 	}
 
 	void DrawUniformColorTriangle(Target& target, const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3)
@@ -311,10 +328,7 @@ namespace ImGuiSDL
 			static_cast<int>(round(v3.pos.x)) - renderInfo.MinX, static_cast<int>(round(v3.pos.y)) - renderInfo.MinY);
 		if (target.UniformColorTriangleCache.count(key) > 0)
 		{
-			const auto& cacheItem = target.UniformColorTriangleCache.at(key);
-
-			const SDL_Rect destination = { renderInfo.MinX, renderInfo.MinY, cacheItem.Width, cacheItem.Height };
-			SDL_RenderCopy(target.Renderer, cacheItem.Texture, nullptr, &destination);
+			DrawCachedTriangle(target, target.UniformColorTriangleCache.at(key), renderInfo);
 
 			return;
 		}

@@ -44,8 +44,6 @@ int main()
 
 	ImGuiSDL::Target target(800, 600, renderer);
 
-	SDL_Texture* sheet = SDL_CreateTextureFromSurface(renderer, texture.Surface);
-
 	bool run = true;
 	while (run)
 	{
