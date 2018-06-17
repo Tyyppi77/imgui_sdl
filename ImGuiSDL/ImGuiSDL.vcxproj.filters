@@ -41,6 +41,7 @@
     <ClCompile Include="..\imgui-1.61\imgui_sw.cpp">
       <Filter>ImGui</Filter>
     </ClCompile>
-    <ClCompile Include="ImGuiSDL.cpp" />
+    <ClCompile Include="example.cpp" />
+    <ClCompile Include="imgui_sdl.h" />
   </ItemGroup>
 </Project>
