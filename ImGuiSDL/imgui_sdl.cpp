@@ -10,6 +10,7 @@
 #include <vector>
 #include <iostream>
 #include <algorithm>
+#include <functional>
 
 namespace ImGuiSDL
 {
@@ -172,63 +173,10 @@ namespace ImGuiSDL
 		};
 	}
 
-	static constexpr int CacheTexturePadding = 2;
-
-	void DrawTriangle(Target& target, const ImDrawVert& v0, const ImDrawVert& v1, const ImDrawVert& v2, const Texture* texture, const Rect& bounding)
-	{
-		// TODO: Figure out how to actually position this stuff, looks offset.
-		const SDL_Rect destination = {
-			static_cast<int>(bounding.MinX) - CacheTexturePadding,
-			static_cast<int>(bounding.MinY) - CacheTexturePadding,
-			static_cast<int>((bounding.MaxX - bounding.MinX)) + 2 * CacheTexturePadding,
-			static_cast<int>((bounding.MaxY - bounding.MinY)) + 2 * CacheTexturePadding
-		};
-
-		const Line line0(v0.pos.x, v0.pos.y, v1.pos.x, v1.pos.y);
-		const Line line1(v1.pos.x, v1.pos.y, v2.pos.x, v2.pos.y);
-		const Line line2(v2.pos.x, v2.pos.y, v0.pos.x, v0.pos.y);
-
-		const Color color0 = Color(v0.col);
-		const Color color1 = Color(v1.col);
-		const Color color2 = Color(v2.col);
-
-		const InterpolatedFactorEquation textureU(v0.uv.x, v1.uv.x, v2.uv.x, v0.pos, v1.pos, v2.pos);
-		const InterpolatedFactorEquation textureV(v0.uv.y, v1.uv.y, v2.uv.y, v0.pos, v1.pos, v2.pos);
-
-		const InterpolatedFactorEquation shadeR(color0.R, color1.R, color2.R, v0.pos, v1.pos, v2.pos);
-		const InterpolatedFactorEquation shadeG(color0.G, color1.G, color2.G, v0.pos, v1.pos, v2.pos);
-		const InterpolatedFactorEquation shadeB(color0.B, color1.B, color2.B, v0.pos, v1.pos, v2.pos);
-		const InterpolatedFactorEquation shadeA(color0.A, color1.A, color2.A, v0.pos, v1.pos, v2.pos);
-
-		for (int drawY = 0; drawY <= destination.h; drawY += 1)
-		{
-			for (int drawX = 0; drawX <= destination.w; drawX += 1)
-			{
-				const double sampleX = drawX + 0.5f + bounding.MinX;
-				const double sampleY = drawY + 0.5f + bounding.MinY;
-
-				const double checkX = sampleX;
-				const double checkY = sampleY;
-
-				if (line0.IsInside(checkX, checkY) && line1.IsInside(checkX, checkY) && line2.IsInside(checkX, checkY))
-				{
-					const double u = textureU.Evaluate(sampleX, sampleY);
-					const double v = textureV.Evaluate(sampleX, sampleY);
-
-					// Sample the color from the surface.
-					const Color& sampled = texture->Sample(u, v);
-
-					const Color& shade = Color(shadeR.Evaluate(sampleX, sampleY), shadeG.Evaluate(sampleX, sampleY), shadeB.Evaluate(sampleX, sampleY), shadeA.Evaluate(sampleX, sampleY));
-
-					target.SetAt(drawX + CacheTexturePadding, drawY + CacheTexturePadding, sampled * shade);
-				}
-			}
-		}
-	}
-
-	void DrawTriangleNoCache(Target& target, const ImDrawVert& v3, const ImDrawVert& v2, const ImDrawVert& v1, const Texture* texture)
+	void DrawTriangleWithColorFunction(Target& target, const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const std::function<Color(double x, double y)>& colorFunction)
 	{
 		// RIPPED OFF FROM https://web.archive.org/web/20171128164608/http://forum.devmaster.net/t/advanced-rasterization/6145.
+		// This is a fixed point imlementation that rounds to top-left.
 
 		static constexpr float scale = 16.0f;
 		const int y1 = static_cast<int>(round(v1.pos.y * scale));
@@ -282,7 +230,7 @@ namespace ImGuiSDL
 			{
 				if (cX1 > 0 && cX2 > 0 && cX3 > 0)
 				{
-					target.SetAt(x, y, Color(v1.col));
+					target.SetAt(x, y, colorFunction(x + 0.5, y + 0.5));
 				}
 
 				cX1 -= fixedDeltaY12;
@@ -296,163 +244,37 @@ namespace ImGuiSDL
 		}
 	}
 
-	void DrawBottomFlatTriangle(Target& target, double x0, double y0, double x1, double y1, double x2, double y2, const Color& color)
+	void DrawTriangle(Target& target, const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const Texture* texture, const Rect& bounding)
 	{
-		const double invSlope0 = (x1 - x0) / (y1 - y0);
-		const double invSlope1 = (x2 - x0) / (y2 - y0);
+		const Color color0 = Color(v1.col);
+		const Color color1 = Color(v2.col);
+		const Color color2 = Color(v3.col);
 
-		double currentX0(x0);
-		double currentX1(x0);
+		const InterpolatedFactorEquation textureU(v1.uv.x, v2.uv.x, v3.uv.x, v1.pos, v2.pos, v3.pos);
+		const InterpolatedFactorEquation textureV(v1.uv.y, v2.uv.y, v3.uv.y, v1.pos, v2.pos, v3.pos);
 
-		for (int scanLineY = y0; scanLineY <= y1; scanLineY++)
-		{
-			// Draws a horizontal line slice.
-			const double xStart = std::min(currentX0, currentX1);
-			const double xEnd = std::max(currentX0, currentX1);
-			for (int x = static_cast<int>(xStart); x <= static_cast<int>(xEnd); x++)
-			{
-				target.SetAt(x + CacheTexturePadding, scanLineY + CacheTexturePadding, color);
-			}
+		const InterpolatedFactorEquation shadeR(color0.R, color1.R, color2.R, v1.pos, v2.pos, v3.pos);
+		const InterpolatedFactorEquation shadeG(color0.G, color1.G, color2.G, v1.pos, v2.pos, v3.pos);
+		const InterpolatedFactorEquation shadeB(color0.B, color1.B, color2.B, v1.pos, v2.pos, v3.pos);
+		const InterpolatedFactorEquation shadeA(color0.A, color1.A, color2.A, v1.pos, v2.pos, v3.pos);
 
-			currentX0 = currentX0 + invSlope1;
-			currentX1 = currentX1 + invSlope0;
-		}
+		// The naming inconsistency in the parameters is intentional. The fixed point algorithm wants the vertices in a counter clockwise order.
+		DrawTriangleWithColorFunction(target, v3, v2, v1, [&](double x, double y) {
+			const double u = textureU.Evaluate(x, y);
+			const double v = textureV.Evaluate(x, y);
+			const Color sampled = texture->Sample(u, v);
+			const Color shade = Color(shadeR.Evaluate(x, y), shadeG.Evaluate(x, y), shadeB.Evaluate(x, y), shadeA.Evaluate(x, y));
+
+			return sampled * shade;
+		});
 	}
 
-	void DrawTopFlatTriangle(Target& target, double x0, double y0, double x1, double y1, double x2, double y2, const Color& color)
+	void DrawUniformColorTriangle(Target& target, const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3)
 	{
-		const double invSlope0 = (x2 - x0) / (y2 - y0);
-		const double invSlope1 = (x2 - x1) / (y2 - y1);
+		const Color color(v1.col);
 
-		double currentX0(x2);
-		double currentX1(x2);
-
-		for (int scanLineY = y2; scanLineY > y0; scanLineY--)
-		{
-			// Draws a horizontal line slice.
-			const double xStart = std::min(currentX0, currentX1);
-			const double xEnd = std::max(currentX0, currentX1);
-			for (int x = static_cast<int>(xStart); x <= static_cast<int>(xEnd); x++)
-			{
-				target.SetAt(x + CacheTexturePadding, scanLineY + CacheTexturePadding, color);
-			}
-
-			currentX0 = currentX0 - invSlope0;
-			currentX1 = currentX1 - invSlope1;
-		}
-	}
-
-	void DrawLine(Target& target, ImVec2 start, ImVec2 end, const Color& color)
-	{
-		const bool isSteep = (std::abs((end.y - start.y)) > std::abs((end.x - start.x)));
-		if (isSteep)
-		{
-			std::swap(start.x, start.y);
-			std::swap(end.x, end.y);
-		}
-
-		if (start.x > end.x)
-		{
-			std::swap(start, end);
-		}
-
-		const double dx = end.x - start.x;
-		const double dy = std::abs((end.y - start.y));
-
-		double error = dx / 2.0f;
-		const int ystep = (start.y < end.y) ? 1 : -1;
-		int y = start.y;
-
-		for (int x = start.x; x <= end.x; x++)
-		{
-			if (isSteep) target.SetAt(y + CacheTexturePadding, x + CacheTexturePadding, color);
-			else target.SetAt(x + CacheTexturePadding, y + CacheTexturePadding, color);
-
-			error -= dy;
-			if (error < 0.0f)
-			{
-				y += ystep;
-				error += dx;
-			}
-		}
-	}
-
-	void DrawUniformColorTriangle(Target& target, const ImDrawVert& v0, const ImDrawVert& v1, const ImDrawVert& v2, const Rect& bounding)
-	{
-		// TODO: Code duplication from the generic triangle function.
-
-		// TODO: Figure out how to actually position this stuff, looks offset.
-		const SDL_Rect destination = {
-			static_cast<int>(bounding.MinX) - CacheTexturePadding,
-			static_cast<int>(bounding.MinY) - CacheTexturePadding,
-			static_cast<int>((bounding.MaxX - bounding.MinX)) + 2 * CacheTexturePadding,
-			static_cast<int>((bounding.MaxY - bounding.MinY)) + 2 * CacheTexturePadding
-		};
-
-		const ImVec2 offset0 = ImVec2(v0.pos.x - bounding.MinX, v0.pos.y - bounding.MinY);
-		const ImVec2 offset1 = ImVec2(v1.pos.x - bounding.MinX, v1.pos.y - bounding.MinY);
-		const ImVec2 offset2 = ImVec2(v2.pos.x - bounding.MinX, v2.pos.y - bounding.MinY);
-
-		// TODO: We actually generate a lot of redundant cache textures that have the same content.
-
-		// Constructs a cache key that we can use to see if there's a cached version of what we're about to render,
-		// or if there doesn't exist anything, we create a cache item.
-		const Target::TextureCacheKey key = std::make_tuple(
-			offset0.x, offset0.y, v0.uv.x, v0.uv.y, v0.col,
-			offset1.x, offset1.y, v1.uv.x, v1.uv.y, v1.col,
-			offset2.x, offset2.y, v2.uv.x, v2.uv.y, v2.col,
-			destination.w, destination.h);
-		if (target.CacheTextures.count(key) > 0)
-		{
-			// TODO: Do we use this cache more than once per frame, per texture?
-
-			SDL_RenderCopy(target.Renderer, target.CacheTextures.at(key), nullptr, &destination);
-
-			return;
-		}
-
-		SDL_Texture* cacheTexture = target.MakeTexture(destination.w, destination.h);
-		target.UseAsRenderTarget(cacheTexture);
-		target.DisableClip();
-
-		// Draw the triangle here.
-
-		const Color color = Color(v0.col);
-
-		std::vector<ImVec2> vertices = { offset0, offset1, offset2 };
-		std::sort(vertices.begin(), vertices.end(), [](const ImVec2& a, const ImVec2& b) { return a.y < b.y; });
-
-		const ImVec2& vertex0 = vertices.at(0);
-		const ImVec2& vertex1 = vertices.at(1);
-		const ImVec2& vertex2 = vertices.at(2);
-
-		if (vertex1.y == vertex2.y)
-		{
-			DrawBottomFlatTriangle(target, vertex0.x, vertex0.y, vertex1.x, vertex1.y, vertex2.x, vertex2.y, color);
-		}
-		else if (vertex0.y == vertex1.y)
-		{
-			DrawTopFlatTriangle(target, vertex0.x, vertex0.y, vertex1.x, vertex1.y, vertex2.x, vertex2.y, color);
-		}
-		else
-		{
-			const ImVec2 vertex3 = ImVec2(
-				vertex0.x + ((vertex1.y - vertex0.y) / (vertex2.y - vertex0.y)) * (vertex2.x - vertex0.x), vertex1.y);
-
-			DrawBottomFlatTriangle(target, vertex0.x, vertex0.y, vertex1.x, vertex1.y, vertex3.x, vertex3.y, color);
-			DrawTopFlatTriangle(target, vertex1.x, vertex1.y, vertex3.x, vertex3.y, vertex2.x, vertex2.y, color);
-		}
-
-		DrawLine(target, vertex0, vertex1, color);
-		DrawLine(target, vertex1, vertex2, color);
-		DrawLine(target, vertex2, vertex0, color);
-
-		target.EnableClip();
-		target.UseAsRenderTarget(nullptr);
-
-		SDL_RenderCopy(target.Renderer, cacheTexture, nullptr, &destination);
-
-		target.CacheTextures[key] = cacheTexture;
+		// The naming inconsistency in the parameters is intentional. The fixed point algorithm wants the vertices in a counter clockwise order.
+		DrawTriangleWithColorFunction(target, v3, v2, v1, [&color](double, double) { return color; });
 	}
 
 	void DrawRectangle(Target& target, const Rect& bounding, const Texture* texture, const Color& color)
@@ -471,51 +293,53 @@ namespace ImGuiSDL
 		{
 			SDL_SetRenderDrawColor(target.Renderer, color.R * 255, color.G * 255, color.B * 255, color.A * 255);
 			SDL_RenderFillRect(target.Renderer, &destination);
-
-			return;
 		}
+		else
+		{
+			// We can now just calculate the correct source rectangle and draw it.
 
-		const SDL_Rect source = {
-			bounding.MinU * texture->Surface->w,
-			bounding.MinV * texture->Surface->h,
-			(bounding.MaxU - bounding.MinU) * texture->Surface->w,
-			(bounding.MaxV - bounding.MinV) * texture->Surface->h
-		};
+			const SDL_Rect source = {
+				bounding.MinU * texture->Surface->w,
+				bounding.MinV * texture->Surface->h,
+				(bounding.MaxU - bounding.MinU) * texture->Surface->w,
+				(bounding.MaxV - bounding.MinV) * texture->Surface->h
+			};
 
-		SDL_SetTextureColorMod(texture->Source, color.R * 255, color.G * 255, color.B * 255);
-		SDL_RenderCopy(target.Renderer, texture->Source, &source, &destination);
+			SDL_SetTextureColorMod(texture->Source, color.R * 255, color.G * 255, color.B * 255);
+			SDL_RenderCopy(target.Renderer, texture->Source, &source, &destination);
+		}
 	}
 
 	void DoImGuiRender(Target& target, ImDrawData* drawData)
 	{
 		for (int n = 0; n < drawData->CmdListsCount; n++)
 		{
-			auto cmdList = drawData->CmdLists[n];
-			auto vertexBuffer = cmdList->VtxBuffer;  // vertex buffer generated by ImGui
-			auto indexBuffer = cmdList->IdxBuffer.Data;   // index buffer generated by ImGui
+			auto commandList = drawData->CmdLists[n];
+			auto vertexBuffer = commandList->VtxBuffer;
+			auto indexBuffer = commandList->IdxBuffer.Data;
 
-			for (int cmd_i = 0; cmd_i < cmdList->CmdBuffer.Size; cmd_i++)
+			for (int cmd_i = 0; cmd_i < commandList->CmdBuffer.Size; cmd_i++)
 			{
-				const ImDrawCmd* pcmd = &cmdList->CmdBuffer[cmd_i];
+				const ImDrawCmd* drawCommand = &commandList->CmdBuffer[cmd_i];
 
 				const ClipRect clipRect = {
-					pcmd->ClipRect.x,
-					pcmd->ClipRect.y,
-					pcmd->ClipRect.z - pcmd->ClipRect.x,
-					pcmd->ClipRect.w - pcmd->ClipRect.y
+					drawCommand->ClipRect.x,
+					drawCommand->ClipRect.y,
+					drawCommand->ClipRect.z - drawCommand->ClipRect.x,
+					drawCommand->ClipRect.w - drawCommand->ClipRect.y
 				};
 				target.SetClipRect(clipRect);
 
-				if (pcmd->UserCallback)
+				if (drawCommand->UserCallback)
 				{
-					pcmd->UserCallback(cmdList, pcmd);
+					drawCommand->UserCallback(commandList, drawCommand);
 				}
 				else
 				{
-					const Texture* texture = static_cast<const Texture*>(pcmd->TextureId);
+					const Texture* texture = static_cast<const Texture*>(drawCommand->TextureId);
 
 					// Loops over triangles.
-					for (int i = 0; i + 3 <= pcmd->ElemCount; i += 3)
+					for (int i = 0; i + 3 <= drawCommand->ElemCount; i += 3)
 					{
 						const ImDrawVert& v0 = vertexBuffer[indexBuffer[i + 0]];
 						const ImDrawVert& v1 = vertexBuffer[indexBuffer[i + 1]];
@@ -523,14 +347,13 @@ namespace ImGuiSDL
 
 						const Rect& bounding = CalculateBoundingBox(v0, v1, v2);
 
-						// TODO: Optimize single color triangles.
 						const bool isTriangleUniformColor = v0.col == v1.col && v1.col == v2.col;
 						const bool doesTriangleUseOnlyColor = bounding.UsesOnlyColor(texture);
 
 						// Actually, since we render a whole bunch of rectangles, we try to first detect those, and render them more efficiently.
 						// How are rectangles detected? It's actually pretty simple: If all 6 vertices lie on the extremes of the bounding box, 
 						// it's a rectangle.
-						if (i + 6 <= pcmd->ElemCount)
+						if (i + 6 <= drawCommand->ElemCount)
 						{
 							const ImDrawVert& v3 = vertexBuffer[indexBuffer[i + 3]];
 							const ImDrawVert& v4 = vertexBuffer[indexBuffer[i + 4]];
@@ -553,14 +376,9 @@ namespace ImGuiSDL
 							}
 						}
 
-						//DrawTriangleNoCache(target, vertexBuffer[indexBuffer[i + 0]], vertexBuffer[indexBuffer[i + 1]], vertexBuffer[indexBuffer[i + 2]], texture);
-
-						// TODO: I just really need to figure out subpixel accuracy with fixed point or something.
-						// http://www.dbfinteractive.com/forum/index.php?topic=6233.0
-
 						if (isTriangleUniformColor && doesTriangleUseOnlyColor)
 						{
-							DrawTriangleNoCache(target, v0, v1, v2, texture);
+							DrawUniformColorTriangle(target, v0, v1, v2);
 						}
 						else
 						{
@@ -569,7 +387,7 @@ namespace ImGuiSDL
 					}
 				}
 
-				indexBuffer += pcmd->ElemCount;
+				indexBuffer += drawCommand->ElemCount;
 			}
 		}
 
