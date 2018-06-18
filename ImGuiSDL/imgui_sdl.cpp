@@ -6,8 +6,7 @@
 #include "imgui.h"
 
 #include <map>
-#include <unordered_map>
-#include <list>
+#include <array>
 #include <vector>
 #include <iostream>
 #include <algorithm>
@@ -75,9 +74,9 @@ struct Color
 	uint32_t ToInt() const
 	{
 		return	((static_cast<int>(R * 255) & 0xff) << 0)
-			| ((static_cast<int>(G * 255) & 0xff) << 8)
-			| ((static_cast<int>(B * 255) & 0xff) << 16)
-			| ((static_cast<int>(A * 255) & 0xff) << 24);
+			  | ((static_cast<int>(G * 255) & 0xff) << 8)
+			  | ((static_cast<int>(B * 255) & 0xff) << 16)
+			  | ((static_cast<int>(A * 255) & 0xff) << 24);
 	}
 
 	void UseAsDrawColor(SDL_Renderer* renderer) const
@@ -104,6 +103,8 @@ struct Device
 		SDL_Texture* Texture = nullptr;
 		int Width = 0, Height = 0;
 
+		// By calling this, the instance that this is called upon can no longer be used to render. 
+		// This is used to essentially move the memory ownership to another instance that is allocated on the heap.
 		TriangleCacheItem* MakeNewSafeCopyAndInvalidate()
 		{
 			TriangleCacheItem* copy = new TriangleCacheItem();
@@ -111,15 +112,14 @@ struct Device
 			copy->Width = Width;
 			copy->Height = Height;
 
-			Texture = nullptr;
+			Texture = nullptr;  // Invalidate this.
 
 			return copy;
 		}
 
 		~TriangleCacheItem()
 		{
-			if (Texture) 
-				SDL_DestroyTexture(Texture);
+			if (Texture) SDL_DestroyTexture(Texture);
 		}
 	};
 
@@ -127,18 +127,18 @@ struct Device
 	static constexpr size_t UniformColorTriangleCacheSize = 512;
 	static constexpr size_t GenericTriangleCacheSize = 64;
 
-	// TODO: Implement an LRU cache and make its size configurable.
+	// Uniform color is identified by its color and the coordinates of the edges.
 	using UniformColorTriangleKey = std::tuple<uint32_t, int, int, int, int, int, int>;
-	Cache<UniformColorTriangleKey, TriangleCacheItem*, UniformColorTriangleCacheSize> UniformColorTriangleCache;
-
 	// The generic triangle cache unfortunately has to be basically a full representation of the triangle.
-	// This includes the (offset) vertex positions, texture coordinates and vertex coordinates.
-	using GenericTriangleKey = std::tuple<int, int, double, double, uint32_t, int, int, double, double, uint32_t, int, int, double, double, uint32_t>;
+	// This includes the (offset) vertex positions, texture coordinates and vertex colors.
+	using GenericTriangleVertexKey = std::tuple<int, int, double, double, uint32_t>;
+	using GenericTriangleKey = std::tuple<GenericTriangleVertexKey, GenericTriangleVertexKey, GenericTriangleVertexKey>;
+
+	Cache<UniformColorTriangleKey, TriangleCacheItem*, UniformColorTriangleCacheSize> UniformColorTriangleCache;
 	Cache<GenericTriangleKey, TriangleCacheItem*, GenericTriangleCacheSize> GenericTriangleCache;
 
 	Device(SDL_Renderer* renderer) : Renderer(renderer)
 	{
-		SDL_SetRenderDrawBlendMode(Renderer, SDL_BLENDMODE_BLEND);
 	}
 
 	void SetClipRect(const ClipRect& rect)
@@ -369,9 +369,9 @@ void DrawTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& 
 	// First we check if there is a cached version of this triangle already waiting for us. If so, we can just do a super fast texture copy.
 
 	const auto key = std::make_tuple(
-		static_cast<int>(round(v1.pos.x)) - renderInfo.MinX, static_cast<int>(round(v1.pos.y)) - renderInfo.MinY, v1.uv.x, v1.uv.y, v1.col,
-		static_cast<int>(round(v2.pos.x)) - renderInfo.MinX, static_cast<int>(round(v2.pos.y)) - renderInfo.MinY, v2.uv.x, v2.uv.y, v2.col,
-		static_cast<int>(round(v3.pos.x)) - renderInfo.MinX, static_cast<int>(round(v3.pos.y)) - renderInfo.MinY, v3.uv.x, v3.uv.y, v3.col);
+		std::make_tuple(static_cast<int>(round(v1.pos.x)) - renderInfo.MinX, static_cast<int>(round(v1.pos.y)) - renderInfo.MinY, v1.uv.x, v1.uv.y, v1.col),
+		std::make_tuple(static_cast<int>(round(v2.pos.x)) - renderInfo.MinX, static_cast<int>(round(v2.pos.y)) - renderInfo.MinY, v2.uv.x, v2.uv.y, v2.col),
+		std::make_tuple(static_cast<int>(round(v3.pos.x)) - renderInfo.MinX, static_cast<int>(round(v3.pos.y)) - renderInfo.MinY, v3.uv.x, v3.uv.y, v3.col));
 
 	if (CurrentDevice->GenericTriangleCache.count(key) > 0)
 	{
@@ -410,7 +410,7 @@ void DrawUniformColorTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const 
 
 	const auto& renderInfo = FixedPointTriangleRenderInfo::CalculateFixedPointTriangleInfo(v3.pos, v2.pos, v1.pos);
 
-	const auto key = std::make_tuple(v1.col,
+	const auto key =std::make_tuple(v1.col,
 		static_cast<int>(round(v1.pos.x)) - renderInfo.MinX, static_cast<int>(round(v1.pos.y)) - renderInfo.MinY,
 		static_cast<int>(round(v2.pos.x)) - renderInfo.MinX, static_cast<int>(round(v2.pos.y)) - renderInfo.MinY,
 		static_cast<int>(round(v3.pos.x)) - renderInfo.MinX, static_cast<int>(round(v3.pos.y)) - renderInfo.MinY);
@@ -519,6 +519,10 @@ namespace ImGuiSDL
 
 	void Render(ImDrawData* drawData)
 	{
+		SDL_BlendMode blendMode;
+		SDL_GetRenderDrawBlendMode(CurrentDevice->Renderer, &blendMode);
+		SDL_SetRenderDrawBlendMode(CurrentDevice->Renderer, SDL_BLENDMODE_BLEND);
+
 		for (int n = 0; n < drawData->CmdListsCount; n++)
 		{
 			auto commandList = drawData->CmdLists[n];
@@ -606,5 +610,7 @@ namespace ImGuiSDL
 		}
 
 		CurrentDevice->DisableClip();
+
+		SDL_SetRenderDrawBlendMode(CurrentDevice->Renderer, blendMode);
 	}
 };
