@@ -12,28 +12,23 @@
 #include <algorithm>
 #include <functional>
 
-// This could be easily replaced with a fast LRU cache, but I found that implementing a fast one is not too easy.
-// Might be something to look at later.
-// This cache is a "purge cache", which means that the whole cache is cleared once the critical size is reached.
+struct Device* CurrentDevice = nullptr;
+
+// This could be easily replaced with a fast LRU cache, but I found that implementing a fast one is not too easy. Might be something to look at later.
+// The implemented cache is a "purge cache", which means that the whole cache is cleared once the critical size is reached.
 template <typename K, typename V, size_t Size> class Cache
 {
 public:
 	Cache() { }
 	~Cache() { Purge(); }
 
-	const V& at(const K& k) const 
-	{
-		return Contents.at(k);
-	}
+	const V& At(const K& k) const  { return Contents.at(k); }
 
-	size_t count(const K& k) const
-	{
-		return Contents.count(k);
-	}
+	bool Contains(const K& k) const { return Contents.count(k) > 0; }
 
-	void insert(const K& k, const V& v)
+	void Insert(const K& k, const V& v)
 	{
-		if (count(k) > 0)
+		if (Contains(k))
 		{
 			delete Contents.at(k);
 		}
@@ -45,7 +40,6 @@ public:
 			Purge();
 		}
 	}
-protected:
 private:
 	void Purge()
 	{
@@ -103,24 +97,7 @@ struct Device
 		SDL_Texture* Texture = nullptr;
 		int Width = 0, Height = 0;
 
-		// By calling this, the instance that this is called upon can no longer be used to render. 
-		// This is used to essentially move the memory ownership to another instance that is allocated on the heap.
-		TriangleCacheItem* MakeNewSafeCopyAndInvalidate()
-		{
-			TriangleCacheItem* copy = new TriangleCacheItem();
-			copy->Texture = Texture;
-			copy->Width = Width;
-			copy->Height = Height;
-
-			Texture = nullptr;  // Invalidate this.
-
-			return copy;
-		}
-
-		~TriangleCacheItem()
-		{
-			if (Texture) SDL_DestroyTexture(Texture);
-		}
+		~TriangleCacheItem() { if (Texture) SDL_DestroyTexture(Texture); }
 	};
 
 	// You can tweak these to values that you find that work the best.
@@ -137,30 +114,17 @@ struct Device
 	Cache<UniformColorTriangleKey, TriangleCacheItem*, UniformColorTriangleCacheSize> UniformColorTriangleCache;
 	Cache<GenericTriangleKey, TriangleCacheItem*, GenericTriangleCacheSize> GenericTriangleCache;
 
-	Device(SDL_Renderer* renderer) : Renderer(renderer)
-	{
-	}
+	Device(SDL_Renderer* renderer) : Renderer(renderer) { }
 
 	void SetClipRect(const ClipRect& rect)
 	{
 		Clip = rect;
-		const SDL_Rect clip = {
-			rect.X,
-			rect.Y,
-			rect.Width,
-			rect.Height
-		};
+		const SDL_Rect clip = { rect.X, rect.Y, rect.Width, rect.Height };
 		SDL_RenderSetClipRect(Renderer, &clip);
 	}
 
-	void EnableClip()
-	{
-		SetClipRect(Clip);
-	}
-	void DisableClip()
-	{
-		SDL_RenderSetClipRect(Renderer, nullptr);
-	}
+	void EnableClip() { SetClipRect(Clip); }
+	void DisableClip() { SDL_RenderSetClipRect(Renderer, nullptr); }
 
 	void SetAt(int x, int y, const Color& color)
 	{
@@ -185,8 +149,6 @@ struct Device
 		}
 	}
 };
-
-Device* CurrentDevice = nullptr;
 
 struct Texture
 {
@@ -216,9 +178,7 @@ template <typename T> class InterpolatedFactorEquation
 public:
 	InterpolatedFactorEquation(const T& value0, const T& value1, const T& value2, const ImVec2& v0, const ImVec2& v1, const ImVec2& v2)
 		: Value0(value0), Value1(value1), Value2(value2), V0(v0), V1(v1), V2(v2),
-		Divisor((V1.y - V2.y) * (V0.x - V2.x) + (V2.x - V1.x) * (V0.y - V2.y))
-	{
-	}
+		Divisor((V1.y - V2.y) * (V0.x - V2.x) + (V2.x - V1.x) * (V0.y - V2.y)) { }
 
 	T Evaluate(float x, float y) const
 	{
@@ -256,6 +216,20 @@ struct Rect
 
 		return MinU == MaxU && MinU == whitePixel.x && MinV == MaxV && MaxV == whitePixel.y;
 	}
+
+	static Rect CalculateBoundingBox(const ImDrawVert& v0, const ImDrawVert& v1, const ImDrawVert& v2)
+	{
+		return Rect{
+			std::min({ v0.pos.x, v1.pos.x, v2.pos.x }),
+			std::min({ v0.pos.y, v1.pos.y, v2.pos.y }),
+			std::max({ v0.pos.x, v1.pos.x, v2.pos.x }),
+			std::max({ v0.pos.y, v1.pos.y, v2.pos.y }),
+			std::min({ v0.uv.x, v1.uv.x, v2.uv.x }),
+			std::min({ v0.uv.y, v1.uv.y, v2.uv.y }),
+			std::max({ v0.uv.x, v1.uv.x, v2.uv.x }),
+			std::max({ v0.uv.y, v1.uv.y, v2.uv.y })
+		};
+	}
 };
 
 struct FixedPointTriangleRenderInfo
@@ -284,7 +258,7 @@ struct FixedPointTriangleRenderInfo
 	}
 };
 
-void DrawTriangleWithColorFunction(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const FixedPointTriangleRenderInfo& renderInfo, const std::function<Color(float x, float y)>& colorFunction, Device::TriangleCacheItem& cacheItem)
+void DrawTriangleWithColorFunction(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const FixedPointTriangleRenderInfo& renderInfo, const std::function<Color(float x, float y)>& colorFunction, Device::TriangleCacheItem* cacheItem)
 {
 	// Implementation source: https://web.archive.org/web/20171128164608/http://forum.devmaster.net/t/advanced-rasterization/6145.
 	// This is a fixed point implementation that rounds to top-left.
@@ -351,9 +325,9 @@ void DrawTriangleWithColorFunction(const ImDrawVert& v1, const ImDrawVert& v2, c
 	CurrentDevice->UseAsRenderTarget(nullptr);
 	CurrentDevice->EnableClip();
 
-	cacheItem.Texture = cache;
-	cacheItem.Width = width;
-	cacheItem.Height = height;
+	cacheItem->Texture = cache;
+	cacheItem->Width = width;
+	cacheItem->Height = height;
 }
 
 void DrawCachedTriangle(const Device::TriangleCacheItem* triangle, const FixedPointTriangleRenderInfo& renderInfo)
@@ -373,9 +347,9 @@ void DrawTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& 
 		std::make_tuple(static_cast<int>(round(v2.pos.x)) - renderInfo.MinX, static_cast<int>(round(v2.pos.y)) - renderInfo.MinY, v2.uv.x, v2.uv.y, v2.col),
 		std::make_tuple(static_cast<int>(round(v3.pos.x)) - renderInfo.MinX, static_cast<int>(round(v3.pos.y)) - renderInfo.MinY, v3.uv.x, v3.uv.y, v3.col));
 
-	if (CurrentDevice->GenericTriangleCache.count(key) > 0)
+	if (CurrentDevice->GenericTriangleCache.Contains(key))
 	{
-		DrawCachedTriangle(CurrentDevice->GenericTriangleCache.at(key), renderInfo);
+		DrawCachedTriangle(CurrentDevice->GenericTriangleCache.At(key), renderInfo);
 
 		return;
 	}
@@ -385,7 +359,7 @@ void DrawTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& 
 
 	const InterpolatedFactorEquation<Color> shadeColor(Color(v1.col), Color(v2.col), Color(v3.col), v1.pos, v2.pos, v3.pos);
 
-	Device::TriangleCacheItem cached;
+	auto* cached = new Device::TriangleCacheItem();  // The memory is managed by the cache.
 	// The naming inconsistency in the parameters is intentional. The fixed point algorithm wants the vertices in a counter clockwise order.
 	DrawTriangleWithColorFunction(v3, v2, v1, renderInfo, [&](float x, float y) {
 		const float u = textureU.Evaluate(x, y);
@@ -396,12 +370,12 @@ void DrawTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& 
 		return sampled * shade;
 	}, cached);
 
-	if (!cached.Texture) return;
+	if (!cached->Texture) return;
 
-	const SDL_Rect destination = { renderInfo.MinX, renderInfo.MinY, cached.Width, cached.Height };
-	SDL_RenderCopy(CurrentDevice->Renderer, cached.Texture, nullptr, &destination);
+	const SDL_Rect destination = { renderInfo.MinX, renderInfo.MinY, cached->Width, cached->Height };
+	SDL_RenderCopy(CurrentDevice->Renderer, cached->Texture, nullptr, &destination);
 
-	CurrentDevice->GenericTriangleCache.insert(key, cached.MakeNewSafeCopyAndInvalidate());
+	CurrentDevice->GenericTriangleCache.Insert(key, cached);
 }
 
 void DrawUniformColorTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3)
@@ -414,23 +388,23 @@ void DrawUniformColorTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const 
 		static_cast<int>(round(v1.pos.x)) - renderInfo.MinX, static_cast<int>(round(v1.pos.y)) - renderInfo.MinY,
 		static_cast<int>(round(v2.pos.x)) - renderInfo.MinX, static_cast<int>(round(v2.pos.y)) - renderInfo.MinY,
 		static_cast<int>(round(v3.pos.x)) - renderInfo.MinX, static_cast<int>(round(v3.pos.y)) - renderInfo.MinY);
-	if (CurrentDevice->UniformColorTriangleCache.count(key) > 0)
+	if (CurrentDevice->UniformColorTriangleCache.Contains(key))
 	{
-		DrawCachedTriangle(CurrentDevice->UniformColorTriangleCache.at(key), renderInfo);
+		DrawCachedTriangle(CurrentDevice->UniformColorTriangleCache.At(key), renderInfo);
 
 		return;
 	}
 
-	Device::TriangleCacheItem cached;
+	auto* cached = new Device::TriangleCacheItem();  // The memory is managed by the cache.
 	// The naming inconsistency in the parameters is intentional. The fixed point algorithm wants the vertices in a counter clockwise order.
 	DrawTriangleWithColorFunction(v3, v2, v1, renderInfo, [&color](float, float) { return color; }, cached);
 
-	if (!cached.Texture) return;
+	if (!cached->Texture) return;
 
-	const SDL_Rect destination = { renderInfo.MinX, renderInfo.MinY, cached.Width, cached.Height };
-	SDL_RenderCopy(CurrentDevice->Renderer, cached.Texture, nullptr, &destination);
+	const SDL_Rect destination = { renderInfo.MinX, renderInfo.MinY, cached->Width, cached->Height };
+	SDL_RenderCopy(CurrentDevice->Renderer, cached->Texture, nullptr, &destination);
 
-	CurrentDevice->UniformColorTriangleCache.insert(key, cached.MakeNewSafeCopyAndInvalidate());
+	CurrentDevice->UniformColorTriangleCache.Insert(key, cached);
 }
 
 void DrawRectangle(const Rect& bounding, const Texture* texture, const Color& color, bool doHorizontalFlip, bool doVerticalFlip)
@@ -466,20 +440,6 @@ void DrawRectangle(const Rect& bounding, const Texture* texture, const Color& co
 		SDL_SetTextureColorMod(texture->Source, static_cast<uint8_t>(color.R * 255), static_cast<uint8_t>(color.G * 255), static_cast<uint8_t>(color.B * 255));
 		SDL_RenderCopyEx(CurrentDevice->Renderer, texture->Source, &source, &destination, 0.0, nullptr, flip);
 	}
-}
-
-Rect CalculateBoundingBox(const ImDrawVert& v0, const ImDrawVert& v1, const ImDrawVert& v2)
-{
-	return Rect{
-		std::min({ v0.pos.x, v1.pos.x, v2.pos.x }),
-		std::min({ v0.pos.y, v1.pos.y, v2.pos.y }),
-		std::max({ v0.pos.x, v1.pos.x, v2.pos.x }),
-		std::max({ v0.pos.y, v1.pos.y, v2.pos.y }),
-		std::min({ v0.uv.x, v1.uv.x, v2.uv.x }),
-		std::min({ v0.uv.y, v1.uv.y, v2.uv.y }),
-		std::max({ v0.uv.x, v1.uv.x, v2.uv.x }),
-		std::max({ v0.uv.y, v1.uv.y, v2.uv.y })
-	};
 }
 
 namespace ImGuiSDL
@@ -556,7 +516,7 @@ namespace ImGuiSDL
 						const ImDrawVert& v1 = vertexBuffer[indexBuffer[i + 1]];
 						const ImDrawVert& v2 = vertexBuffer[indexBuffer[i + 2]];
 
-						const Rect& bounding = CalculateBoundingBox(v0, v1, v2);
+						const Rect& bounding = Rect::CalculateBoundingBox(v0, v1, v2);
 
 						const bool isTriangleUniformColor = v0.col == v1.col && v1.col == v2.col;
 						const bool doesTriangleUseOnlyColor = bounding.UsesOnlyColor(texture);
