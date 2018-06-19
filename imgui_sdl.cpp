@@ -475,6 +475,8 @@ namespace ImGuiSDL
 		ImGuiIO& io = ImGui::GetIO();
 		Texture* texture = static_cast<Texture*>(io.Fonts->TexID);
 		delete texture;
+
+		delete CurrentDevice;
 	}
 
 	void Render(ImDrawData* drawData)
