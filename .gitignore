@@ -2,8 +2,9 @@
 Include/
 imgui-1.61/
 ImGuiSDL/*ini
-*.snl
+*.sln
 *.vcxproj*
+*.html
 
 
 

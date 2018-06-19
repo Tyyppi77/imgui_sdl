@@ -1,7 +1,6 @@
 #include "imgui_sdl.h"
 
 #include "SDL.h"
-#undef main
 
 #include "imgui.h"
 

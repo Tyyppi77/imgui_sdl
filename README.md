@@ -33,6 +33,10 @@ To cleanup at exit, you can call `ImGuiSDL::Deinitialize`, but that doesn't do a
 
 As you can see the results are not perfect, but this display is definitely good enough to be used as a debug UI which is the main use case for Dear ImGui anyways. The rendering is also done in a little bit simpler style than what Dear ImGui uses by default, mainly to increase the amount of rendering that can be done using rectangles.
 
+## Requirements
+
+The implementation doesn't rely on any non-standard SDL functionality, imgui_sdl.cpp simply includes SDL.h and imgui.h. You can easily change these two includes to point to the correct locations if you use some sort of other include file scheme.
+
 ## Notes
 
 Do note that this is just a renderer for SDL2. For input handling, you shoud use the [great SDL2 implementation](https://github.com/ocornut/imgui/blob/master/examples/imgui_impl_sdl.cpp) provided in the Dear ImGui repository, or you could of course roll your own event provider.
