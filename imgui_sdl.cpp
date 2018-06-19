@@ -209,7 +209,7 @@ struct Rect
 		return (point.x == MinX || point.x == MaxX) && (point.y == MinY || point.y == MaxY);
 	}
 
-	bool UsesOnlyColor(const Texture* texture) const
+	bool UsesOnlyColor() const
 	{
 		const ImVec2& whitePixel = ImGui::GetIO().Fonts->TexUvWhitePixel;
 
@@ -257,7 +257,7 @@ struct FixedPointTriangleRenderInfo
 	}
 };
 
-void DrawTriangleWithColorFunction(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const FixedPointTriangleRenderInfo& renderInfo, const std::function<Color(float x, float y)>& colorFunction, Device::TriangleCacheItem* cacheItem)
+void DrawTriangleWithColorFunction(const FixedPointTriangleRenderInfo& renderInfo, const std::function<Color(float x, float y)>& colorFunction, Device::TriangleCacheItem* cacheItem)
 {
 	// Implementation source: https://web.archive.org/web/20171128164608/http://forum.devmaster.net/t/advanced-rasterization/6145.
 	// This is a fixed point implementation that rounds to top-left.
@@ -335,8 +335,9 @@ void DrawCachedTriangle(const Device::TriangleCacheItem* triangle, const FixedPo
 	SDL_RenderCopy(CurrentDevice->Renderer, triangle->Texture, nullptr, &destination);
 }
 
-void DrawTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const Texture* texture, const Rect& bounding)
+void DrawTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const Texture* texture)
 {
+	// The naming inconsistency in the parameters is intentional. The fixed point algorithm wants the vertices in a counter clockwise order.
 	const auto& renderInfo = FixedPointTriangleRenderInfo::CalculateFixedPointTriangleInfo(v3.pos, v2.pos, v1.pos);
 
 	// First we check if there is a cached version of this triangle already waiting for us. If so, we can just do a super fast texture copy.
@@ -359,8 +360,7 @@ void DrawTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& 
 	const InterpolatedFactorEquation<Color> shadeColor(Color(v1.col), Color(v2.col), Color(v3.col), v1.pos, v2.pos, v3.pos);
 
 	auto* cached = new Device::TriangleCacheItem();  // The memory is managed by the cache.
-	// The naming inconsistency in the parameters is intentional. The fixed point algorithm wants the vertices in a counter clockwise order.
-	DrawTriangleWithColorFunction(v3, v2, v1, renderInfo, [&](float x, float y) {
+	DrawTriangleWithColorFunction(renderInfo, [&](float x, float y) {
 		const float u = textureU.Evaluate(x, y);
 		const float v = textureV.Evaluate(x, y);
 		const Color sampled = texture->Sample(u, v);
@@ -381,6 +381,7 @@ void DrawUniformColorTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const 
 {
 	const Color color(v1.col);
 
+	// The naming inconsistency in the parameters is intentional. The fixed point algorithm wants the vertices in a counter clockwise order.
 	const auto& renderInfo = FixedPointTriangleRenderInfo::CalculateFixedPointTriangleInfo(v3.pos, v2.pos, v1.pos);
 
 	const auto key =std::make_tuple(v1.col,
@@ -395,8 +396,7 @@ void DrawUniformColorTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const 
 	}
 
 	auto* cached = new Device::TriangleCacheItem();  // The memory is managed by the cache.
-	// The naming inconsistency in the parameters is intentional. The fixed point algorithm wants the vertices in a counter clockwise order.
-	DrawTriangleWithColorFunction(v3, v2, v1, renderInfo, [&color](float, float) { return color; }, cached);
+	DrawTriangleWithColorFunction(renderInfo, [&color](float, float) { return color; }, cached);
 
 	if (!cached->Texture) return;
 
@@ -418,7 +418,7 @@ void DrawRectangle(const Rect& bounding, const Texture* texture, const Color& co
 	};
 
 	// If the area isn't textured, we can just draw a rectangle with the correct color.
-	if (bounding.UsesOnlyColor(texture))
+	if (bounding.UsesOnlyColor())
 	{
 		color.UseAsDrawColor(CurrentDevice->Renderer);
 		SDL_RenderFillRect(CurrentDevice->Renderer, &destination);
@@ -520,7 +520,7 @@ namespace ImGuiSDL
 						const Rect& bounding = Rect::CalculateBoundingBox(v0, v1, v2);
 
 						const bool isTriangleUniformColor = v0.col == v1.col && v1.col == v2.col;
-						const bool doesTriangleUseOnlyColor = bounding.UsesOnlyColor(texture);
+						const bool doesTriangleUseOnlyColor = bounding.UsesOnlyColor();
 
 						// Actually, since we render a whole bunch of rectangles, we try to first detect those, and render them more efficiently.
 						// How are rectangles detected? It's actually pretty simple: If all 6 vertices lie on the extremes of the bounding box, 
@@ -561,7 +561,7 @@ namespace ImGuiSDL
 						}
 						else
 						{
-							DrawTriangle(v0, v1, v2, texture, bounding);
+							DrawTriangle(v0, v1, v2, texture);
 						}
 					}
 				}
