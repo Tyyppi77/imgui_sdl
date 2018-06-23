@@ -14,6 +14,14 @@ int main()
 	ImGui::CreateContext();
 	ImGuiSDL::Initialize(renderer, 800, 600);
 
+	SDL_Texture* texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, 100, 100);
+	{
+		SDL_SetRenderTarget(renderer, texture);
+		SDL_SetRenderDrawColor(renderer, 255, 0, 255, 255);
+		SDL_RenderClear(renderer);
+		SDL_SetRenderTarget(renderer, nullptr);
+	}
+
 	bool run = true;
 	while (run)
 	{
@@ -53,6 +61,10 @@ int main()
 		ImGui::NewFrame();
 
 		ImGui::ShowDemoWindow();
+
+		ImGui::Begin("Image");
+		ImGui::Image(texture, ImVec2(100, 100));
+		ImGui::End();
 
 		SDL_SetRenderDrawColor(renderer, 114, 144, 154, 255);
 		SDL_RenderClear(renderer);

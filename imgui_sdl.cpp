@@ -5,6 +5,7 @@
 #include "imgui.h"
 
 #include <map>
+#include <cmath>
 #include <array>
 #include <vector>
 #include <iostream>
@@ -86,6 +87,29 @@ struct Device
 {
 	SDL_Renderer* Renderer;
 
+	struct Texture
+	{
+		SDL_Surface* Surface;
+		SDL_Texture* Source;
+
+		~Texture()
+		{
+			SDL_FreeSurface(Surface);
+			SDL_DestroyTexture(Source);
+		}
+
+		Color Sample(float u, float v) const
+		{
+			const int x = static_cast<int>(std::round(u * (Surface->w - 1) + 0.5f));
+			const int y = static_cast<int>(std::round(v * (Surface->h - 1) + 0.5f));
+
+			const int location = y * Surface->w + x;
+			assert(location < Surface->w * Surface->h);
+
+			return Color(static_cast<uint32_t*>(Surface->pixels)[location]);
+		}
+	}* FontTexture;
+
 	struct ClipRect
 	{
 		int X, Y, Width, Height;
@@ -113,7 +137,8 @@ struct Device
 	Cache<UniformColorTriangleKey, TriangleCacheItem*, UniformColorTriangleCacheSize> UniformColorTriangleCache;
 	Cache<GenericTriangleKey, TriangleCacheItem*, GenericTriangleCacheSize> GenericTriangleCache;
 
-	Device(SDL_Renderer* renderer) : Renderer(renderer) { }
+	Device(SDL_Renderer* renderer, Texture* fontTexture) : Renderer(renderer), FontTexture(fontTexture) { }
+	~Device() { delete FontTexture; }
 
 	void SetClipRect(const ClipRect& rect)
 	{
@@ -146,29 +171,6 @@ struct Device
 			SDL_SetRenderDrawColor(Renderer, 0, 0, 0, 0);
 			SDL_RenderClear(Renderer);
 		}
-	}
-};
-
-struct Texture
-{
-	SDL_Surface* Surface;
-	SDL_Texture* Source;
-
-	~Texture()
-	{
-		SDL_FreeSurface(Surface);
-		SDL_DestroyTexture(Source);
-	}
-
-	Color Sample(float u, float v) const
-	{
-		const int x = static_cast<int>(roundf(u * (Surface->w - 1) + 0.5f));
-		const int y = static_cast<int>(roundf(v * (Surface->h - 1) + 0.5f));
-
-		const int location = y * Surface->w + x;
-		assert(location < Surface->w * Surface->h);
-
-		return Color(static_cast<uint32_t*>(Surface->pixels)[location]);
 	}
 };
 
@@ -240,13 +242,13 @@ struct FixedPointTriangleRenderInfo
 	{
 		static constexpr float scale = 16.0f;
 
-		const int x1 = static_cast<int>(round(v1.x * scale));
-		const int x2 = static_cast<int>(round(v2.x * scale));
-		const int x3 = static_cast<int>(round(v3.x * scale));
+		const int x1 = static_cast<int>(std::round(v1.x * scale));
+		const int x2 = static_cast<int>(std::round(v2.x * scale));
+		const int x3 = static_cast<int>(std::round(v3.x * scale));
 
-		const int y1 = static_cast<int>(round(v1.y * scale));
-		const int y2 = static_cast<int>(round(v2.y * scale));
-		const int y3 = static_cast<int>(round(v3.y * scale));
+		const int y1 = static_cast<int>(std::round(v1.y * scale));
+		const int y2 = static_cast<int>(std::round(v2.y * scale));
+		const int y3 = static_cast<int>(std::round(v3.y * scale));
 
 		int minX = (std::min({ x1, x2, x3 }) + 0xF) >> 4;
 		int maxX = (std::max({ x1, x2, x3 }) + 0xF) >> 4;
@@ -335,7 +337,7 @@ void DrawCachedTriangle(const Device::TriangleCacheItem* triangle, const FixedPo
 	SDL_RenderCopy(CurrentDevice->Renderer, triangle->Texture, nullptr, &destination);
 }
 
-void DrawTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const Texture* texture)
+void DrawTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const Device::Texture* texture)
 {
 	// The naming inconsistency in the parameters is intentional. The fixed point algorithm wants the vertices in a counter clockwise order.
 	const auto& renderInfo = FixedPointTriangleRenderInfo::CalculateFixedPointTriangleInfo(v3.pos, v2.pos, v1.pos);
@@ -343,9 +345,9 @@ void DrawTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& 
 	// First we check if there is a cached version of this triangle already waiting for us. If so, we can just do a super fast texture copy.
 
 	const auto key = std::make_tuple(
-		std::make_tuple(static_cast<int>(round(v1.pos.x)) - renderInfo.MinX, static_cast<int>(round(v1.pos.y)) - renderInfo.MinY, v1.uv.x, v1.uv.y, v1.col),
-		std::make_tuple(static_cast<int>(round(v2.pos.x)) - renderInfo.MinX, static_cast<int>(round(v2.pos.y)) - renderInfo.MinY, v2.uv.x, v2.uv.y, v2.col),
-		std::make_tuple(static_cast<int>(round(v3.pos.x)) - renderInfo.MinX, static_cast<int>(round(v3.pos.y)) - renderInfo.MinY, v3.uv.x, v3.uv.y, v3.col));
+		std::make_tuple(static_cast<int>(std::round(v1.pos.x)) - renderInfo.MinX, static_cast<int>(std::round(v1.pos.y)) - renderInfo.MinY, v1.uv.x, v1.uv.y, v1.col),
+		std::make_tuple(static_cast<int>(std::round(v2.pos.x)) - renderInfo.MinX, static_cast<int>(std::round(v2.pos.y)) - renderInfo.MinY, v2.uv.x, v2.uv.y, v2.col),
+		std::make_tuple(static_cast<int>(std::round(v3.pos.x)) - renderInfo.MinX, static_cast<int>(std::round(v3.pos.y)) - renderInfo.MinY, v3.uv.x, v3.uv.y, v3.col));
 
 	if (CurrentDevice->GenericTriangleCache.Contains(key))
 	{
@@ -385,9 +387,9 @@ void DrawUniformColorTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const 
 	const auto& renderInfo = FixedPointTriangleRenderInfo::CalculateFixedPointTriangleInfo(v3.pos, v2.pos, v1.pos);
 
 	const auto key =std::make_tuple(v1.col,
-		static_cast<int>(round(v1.pos.x)) - renderInfo.MinX, static_cast<int>(round(v1.pos.y)) - renderInfo.MinY,
-		static_cast<int>(round(v2.pos.x)) - renderInfo.MinX, static_cast<int>(round(v2.pos.y)) - renderInfo.MinY,
-		static_cast<int>(round(v3.pos.x)) - renderInfo.MinX, static_cast<int>(round(v3.pos.y)) - renderInfo.MinY);
+		static_cast<int>(std::round(v1.pos.x)) - renderInfo.MinX, static_cast<int>(std::round(v1.pos.y)) - renderInfo.MinY,
+		static_cast<int>(std::round(v2.pos.x)) - renderInfo.MinX, static_cast<int>(std::round(v2.pos.y)) - renderInfo.MinY,
+		static_cast<int>(std::round(v3.pos.x)) - renderInfo.MinX, static_cast<int>(std::round(v3.pos.y)) - renderInfo.MinY);
 	if (CurrentDevice->UniformColorTriangleCache.Contains(key))
 	{
 		DrawCachedTriangle(CurrentDevice->UniformColorTriangleCache.At(key), renderInfo);
@@ -406,7 +408,7 @@ void DrawUniformColorTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const 
 	CurrentDevice->UniformColorTriangleCache.Insert(key, cached);
 }
 
-void DrawRectangle(const Rect& bounding, const Texture* texture, const Color& color, bool doHorizontalFlip, bool doVerticalFlip)
+void DrawRectangle(const Rect& bounding, SDL_Texture* texture, const Color& color, bool doHorizontalFlip, bool doVerticalFlip)
 {
 	// We are safe to assume uniform color here, because the caller checks it and and uses the triangle renderer to render those.
 
@@ -427,17 +429,20 @@ void DrawRectangle(const Rect& bounding, const Texture* texture, const Color& co
 	{
 		// We can now just calculate the correct source rectangle and draw it.
 
+		int textureWidth, textureHeight;
+		SDL_QueryTexture(texture, nullptr, nullptr, &textureWidth, &textureHeight);
+
 		const SDL_Rect source = {
-			static_cast<int>(bounding.MinU * texture->Surface->w),
-			static_cast<int>(bounding.MinV * texture->Surface->h),
-			static_cast<int>((bounding.MaxU - bounding.MinU) * texture->Surface->w),
-			static_cast<int>((bounding.MaxV - bounding.MinV) * texture->Surface->h)
+			static_cast<int>(bounding.MinU *textureWidth),
+			static_cast<int>(bounding.MinV * textureHeight),
+			static_cast<int>((bounding.MaxU - bounding.MinU) * textureWidth),
+			static_cast<int>((bounding.MaxV - bounding.MinV) * textureHeight)
 		};
 
 		const SDL_RendererFlip flip = static_cast<SDL_RendererFlip>((doHorizontalFlip ? SDL_FLIP_HORIZONTAL : 0) | (doVerticalFlip ? SDL_FLIP_VERTICAL : 0));
 
-		SDL_SetTextureColorMod(texture->Source, static_cast<uint8_t>(color.R * 255), static_cast<uint8_t>(color.G * 255), static_cast<uint8_t>(color.B * 255));
-		SDL_RenderCopyEx(CurrentDevice->Renderer, texture->Source, &source, &destination, 0.0, nullptr, flip);
+		SDL_SetTextureColorMod(texture, static_cast<uint8_t>(color.R * 255), static_cast<uint8_t>(color.G * 255), static_cast<uint8_t>(color.B * 255));
+		SDL_RenderCopyEx(CurrentDevice->Renderer, texture, &source, &destination, 0.0, nullptr, flip);
 	}
 }
 
@@ -460,21 +465,16 @@ namespace ImGuiSDL
 		static constexpr uint32_t rmask = 0x000000ff, gmask = 0x0000ff00, bmask = 0x00ff0000, amask = 0xff000000;
 		SDL_Surface* surface = SDL_CreateRGBSurfaceFrom(pixels, width, height, 32, 4 * width, rmask, gmask, bmask, amask);
 
-		Texture* texture = new Texture();
+		auto* texture = new Device::Texture();
 		texture->Surface = surface;
 		texture->Source = SDL_CreateTextureFromSurface(renderer, surface);
-		io.Fonts->TexID = (void*)texture;
+		io.Fonts->TexID = (void*)texture->Source;
 
-		CurrentDevice = new Device(renderer);
+		CurrentDevice = new Device(renderer, texture);
 	}
 
 	void Deinitialize()
 	{
-		// Frees up the memory of the font texture.
-		ImGuiIO& io = ImGui::GetIO();
-		Texture* texture = static_cast<Texture*>(io.Fonts->TexID);
-		delete texture;
-
 		delete CurrentDevice;
 	}
 
@@ -508,7 +508,7 @@ namespace ImGuiSDL
 				}
 				else
 				{
-					const Texture* texture = static_cast<const Texture*>(drawCommand->TextureId);
+					SDL_Texture* texture = static_cast<SDL_Texture*>(drawCommand->TextureId);
 
 					// Loops over triangles.
 					for (unsigned int i = 0; i + 3 <= drawCommand->ElemCount; i += 3)
@@ -561,7 +561,11 @@ namespace ImGuiSDL
 						}
 						else
 						{
-							DrawTriangle(v0, v1, v2, texture);
+							// Custom triangle-shaped texture rendering is not supported for user-provided textures.
+							// I am unsure if this is even possible with ImGui, but we assert here just for safety.
+							assert(texture == CurrentDevice->FontTexture->Source);
+
+							DrawTriangle(v0, v1, v2, CurrentDevice->FontTexture);
 						}
 					}
 				}
