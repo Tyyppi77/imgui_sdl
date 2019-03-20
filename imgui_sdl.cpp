@@ -409,7 +409,7 @@ namespace
 		CurrentDevice->UniformColorTriangleCache.Insert(key, cached);
 	}
 
-	void DrawRectangle(const Rect& bounding, const Texture* texture, const Color& color, bool doHorizontalFlip, bool doVerticalFlip)
+	void DrawRectangle(const Rect& bounding, SDL_Texture* texture, int textureWidth, int textureHeight, const Color& color, bool doHorizontalFlip, bool doVerticalFlip)
 	{
 		// We are safe to assume uniform color here, because the caller checks it and and uses the triangle renderer to render those.
 
@@ -431,17 +431,29 @@ namespace
 			// We can now just calculate the correct source rectangle and draw it.
 
 			const SDL_Rect source = {
-				static_cast<int>(bounding.MinU * texture->Surface->w),
-				static_cast<int>(bounding.MinV * texture->Surface->h),
-				static_cast<int>((bounding.MaxU - bounding.MinU) * texture->Surface->w),
-				static_cast<int>((bounding.MaxV - bounding.MinV) * texture->Surface->h)
+				static_cast<int>(bounding.MinU * textureWidth),
+				static_cast<int>(bounding.MinV * textureHeight),
+				static_cast<int>((bounding.MaxU - bounding.MinU) * textureWidth),
+				static_cast<int>((bounding.MaxV - bounding.MinV) * textureHeight)
 			};
 
 			const SDL_RendererFlip flip = static_cast<SDL_RendererFlip>((doHorizontalFlip ? SDL_FLIP_HORIZONTAL : 0) | (doVerticalFlip ? SDL_FLIP_VERTICAL : 0));
 
-			SDL_SetTextureColorMod(texture->Source, static_cast<uint8_t>(color.R * 255), static_cast<uint8_t>(color.G * 255), static_cast<uint8_t>(color.B * 255));
-			SDL_RenderCopyEx(CurrentDevice->Renderer, texture->Source, &source, &destination, 0.0, nullptr, flip);
+			SDL_SetTextureColorMod(texture, static_cast<uint8_t>(color.R * 255), static_cast<uint8_t>(color.G * 255), static_cast<uint8_t>(color.B * 255));
+			SDL_RenderCopyEx(CurrentDevice->Renderer, texture, &source, &destination, 0.0, nullptr, flip);
 		}
+	}
+
+	void DrawRectangle(const Rect& bounding, const Texture* texture, const Color& color, bool doHorizontalFlip, bool doVerticalFlip)
+	{
+		DrawRectangle(bounding, texture->Source, texture->Surface->w, texture->Surface->h, color, doHorizontalFlip, doVerticalFlip);
+	}
+
+	void DrawRectangle(const Rect& bounding, SDL_Texture* texture, const Color& color, bool doHorizontalFlip, bool doVerticalFlip)
+	{
+		int width, height;
+		SDL_QueryTexture(texture, nullptr, nullptr, &width, &height);
+		DrawRectangle(bounding, texture, width, height, color, doHorizontalFlip, doVerticalFlip);
 	}
 }
 
@@ -488,6 +500,8 @@ namespace ImGuiSDL
 		SDL_GetRenderDrawBlendMode(CurrentDevice->Renderer, &blendMode);
 		SDL_SetRenderDrawBlendMode(CurrentDevice->Renderer, SDL_BLENDMODE_BLEND);
 
+		ImGuiIO& io = ImGui::GetIO();
+
 		for (int n = 0; n < drawData->CmdListsCount; n++)
 		{
 			auto commandList = drawData->CmdLists[n];
@@ -512,7 +526,7 @@ namespace ImGuiSDL
 				}
 				else
 				{
-					const Texture* texture = static_cast<const Texture*>(drawCommand->TextureId);
+					const bool isWrappedTexture = drawCommand->TextureId == io.Fonts->TexID;
 
 					// Loops over triangles.
 					for (unsigned int i = 0; i + 3 <= drawCommand->ElemCount; i += 3)
@@ -552,7 +566,14 @@ namespace ImGuiSDL
 								const bool doHorizontalFlip = v2.uv.x < v0.uv.x;
 								const bool doVerticalFlip = v2.uv.x < v0.uv.x;
 
-								DrawRectangle(bounding, texture, Color(v0.col), doHorizontalFlip, doVerticalFlip);
+								if (isWrappedTexture)
+								{
+									DrawRectangle(bounding, static_cast<const Texture*>(drawCommand->TextureId), Color(v0.col), doHorizontalFlip, doVerticalFlip);
+								}
+								else
+								{
+									DrawRectangle(bounding, static_cast<SDL_Texture*>(drawCommand->TextureId), Color(v0.col), doHorizontalFlip, doVerticalFlip);
+								}
 
 								i += 3;  // Additional increment to account for the extra 3 vertices we consumed.
 								continue;
@@ -565,7 +586,9 @@ namespace ImGuiSDL
 						}
 						else
 						{
-							DrawTriangle(v0, v1, v2, texture);
+							// Currently we assume that any non rectangular texture samples the font texture. Dunno if that's what actually happens, but it seems to work.
+							assert(isWrappedTexture);
+							DrawTriangle(v0, v1, v2, static_cast<const Texture*>(drawCommand->TextureId));
 						}
 					}
 				}
