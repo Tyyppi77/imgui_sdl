@@ -5,54 +5,108 @@
 #include "imgui.h"
 
 #include <map>
+#include <list>
 #include <cmath>
 #include <array>
 #include <vector>
+#include <memory>
 #include <iostream>
 #include <algorithm>
 #include <functional>
+#include <unordered_map>
 
 namespace
 {
 	struct Device* CurrentDevice = nullptr;
 
-	// This could be easily replaced with a fast LRU cache, but I found that implementing a fast one is not too easy. Might be something to look at later.
-	// The implemented cache is a "purge cache", which means that the whole cache is cleared once the critical size is reached.
-	template <typename K, typename V, size_t Size> class Cache
+	namespace TupleHash
+	{
+		template <typename T> struct Hash
+		{
+			std::size_t operator()(const T& value) const
+			{
+				return std::hash<T>()(value);
+			}
+		};
+
+		template <typename T> void CombineHash(std::size_t& seed, const T& value)
+		{
+			seed ^= TupleHash::Hash<T>()(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
+		}
+
+		template <typename Tuple, std::size_t Index = std::tuple_size<Tuple>::value - 1> struct Hasher
+		{
+			static void Hash(std::size_t& seed, const Tuple& tuple)
+			{
+				Hasher<Tuple, Index - 1>::Hash(seed, tuple);
+				CombineHash(seed, std::get<Index>(tuple));
+			}
+		};
+
+		template <typename Tuple> struct Hasher<Tuple, 0>
+		{
+			static void Hash(std::size_t& seed, const Tuple& tuple)
+			{
+				CombineHash(seed, std::get<0>(tuple));
+			}
+		};
+
+		template <typename... T> struct Hash<std::tuple<T...>>
+		{
+			std::size_t operator()(const std::tuple<T...>& value) const
+			{
+				std::size_t seed = 0;
+				Hasher<std::tuple<T...>>::Hash(seed, value);
+				return seed;
+			}
+		};
+	}
+
+	template <typename Key, typename Value, std::size_t Size> class LRUCache
 	{
 	public:
-		Cache() { }
-		~Cache() { Purge(); }
-
-		const V& At(const K& k) const  { return Contents.at(k); }
-
-		bool Contains(const K& k) const { return Contents.count(k) > 0; }
-
-		void Insert(const K& k, const V& v)
+		bool Contains(const Key& key) const
 		{
-			if (Contains(k))
+			return Container.find(key) != Container.end();
+		}
+
+		const Value& At(const Key& key)
+		{
+			assert(Contains(key));
+
+			const auto location = Container.find(key);
+			Order.splice(Order.begin(), Order, location->second);
+			return location->second->second;
+		}
+
+		void Insert(const Key& key, Value value)
+		{
+			const auto existingLocation = Container.find(key);
+			if (existingLocation != Container.end())
 			{
-				delete Contents.at(k);
+				Order.erase(existingLocation->second);
+				Container.erase(existingLocation);
 			}
 
-			Contents[k] = v;
+			Order.push_front(std::make_pair(key, std::move(value)));
+			Container.insert(std::make_pair(key, Order.begin()));
 
-			if (Contents.size() > Size)
-			{
-				Purge();
-			}
+			Clean();
 		}
 	private:
-		void Purge()
+		void Clean()
 		{
-			for (auto& pair : Contents)
+			while (Container.size() > Size)
 			{
-				delete pair.second;
+				auto last = Order.end();
+				last--;
+				Container.erase(last->first);
+				Order.pop_back();
 			}
-			Contents.clear();
 		}
 
-		std::map<K, V> Contents;
+		std::list<std::pair<Key, Value>> Order;
+		std::unordered_map<Key, decltype(Order.begin()), TupleHash::Hash<Key>> Container;
 	};
 
 	struct Color
@@ -103,18 +157,18 @@ namespace
 		};
 
 		// You can tweak these to values that you find that work the best.
-		static constexpr size_t UniformColorTriangleCacheSize = 512;
-		static constexpr size_t GenericTriangleCacheSize = 64;
+		static constexpr std::size_t UniformColorTriangleCacheSize = 512;
+		static constexpr std::size_t GenericTriangleCacheSize = 64;
 
 		// Uniform color is identified by its color and the coordinates of the edges.
 		using UniformColorTriangleKey = std::tuple<uint32_t, int, int, int, int, int, int>;
-		// The generic triangle cache unfortunately has to be basically a full representation of the triangle.
+		// The generic triangle cache unfortunately has to be basically a full representation of the triangle. 
 		// This includes the (offset) vertex positions, texture coordinates and vertex colors.
 		using GenericTriangleVertexKey = std::tuple<int, int, double, double, uint32_t>;
 		using GenericTriangleKey = std::tuple<GenericTriangleVertexKey, GenericTriangleVertexKey, GenericTriangleVertexKey>;
 
-		Cache<UniformColorTriangleKey, TriangleCacheItem*, UniformColorTriangleCacheSize> UniformColorTriangleCache;
-		Cache<GenericTriangleKey, TriangleCacheItem*, GenericTriangleCacheSize> GenericTriangleCache;
+		LRUCache<UniformColorTriangleKey, std::unique_ptr<TriangleCacheItem>, UniformColorTriangleCacheSize> UniformColorTriangleCache;
+		LRUCache<GenericTriangleKey, std::unique_ptr<TriangleCacheItem>, GenericTriangleCacheSize> GenericTriangleCache;
 
 		Device(SDL_Renderer* renderer) : Renderer(renderer) { }
 
@@ -332,10 +386,10 @@ namespace
 		cacheItem->Height = height;
 	}
 
-	void DrawCachedTriangle(const Device::TriangleCacheItem* triangle, const FixedPointTriangleRenderInfo& renderInfo)
+	void DrawCachedTriangle(const Device::TriangleCacheItem& triangle, const FixedPointTriangleRenderInfo& renderInfo)
 	{
-		const SDL_Rect destination = { renderInfo.MinX, renderInfo.MinY, triangle->Width, triangle->Height };
-		SDL_RenderCopy(CurrentDevice->Renderer, triangle->Texture, nullptr, &destination);
+		const SDL_Rect destination = { renderInfo.MinX, renderInfo.MinY, triangle.Width, triangle.Height };
+		SDL_RenderCopy(CurrentDevice->Renderer, triangle.Texture, nullptr, &destination);
 	}
 
 	void DrawTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3, const Texture* texture)
@@ -352,7 +406,8 @@ namespace
 
 		if (CurrentDevice->GenericTriangleCache.Contains(key))
 		{
-			DrawCachedTriangle(CurrentDevice->GenericTriangleCache.At(key), renderInfo);
+			const auto& cached = CurrentDevice->GenericTriangleCache.At(key);
+			DrawCachedTriangle(*cached, renderInfo);
 
 			return;
 		}
@@ -362,7 +417,7 @@ namespace
 
 		const InterpolatedFactorEquation<Color> shadeColor(Color(v1.col), Color(v2.col), Color(v3.col), v1.pos, v2.pos, v3.pos);
 
-		auto* cached = new Device::TriangleCacheItem();  // The memory is managed by the cache.
+		auto cached = std::make_unique<Device::TriangleCacheItem>();
 		DrawTriangleWithColorFunction(renderInfo, [&](float x, float y) {
 			const float u = textureU.Evaluate(x, y);
 			const float v = textureV.Evaluate(x, y);
@@ -370,14 +425,14 @@ namespace
 			const Color shade = shadeColor.Evaluate(x, y);
 
 			return sampled * shade;
-		}, cached);
+		}, cached.get());
 
 		if (!cached->Texture) return;
 
 		const SDL_Rect destination = { renderInfo.MinX, renderInfo.MinY, cached->Width, cached->Height };
 		SDL_RenderCopy(CurrentDevice->Renderer, cached->Texture, nullptr, &destination);
 
-		CurrentDevice->GenericTriangleCache.Insert(key, cached);
+		CurrentDevice->GenericTriangleCache.Insert(key, std::move(cached));
 	}
 
 	void DrawUniformColorTriangle(const ImDrawVert& v1, const ImDrawVert& v2, const ImDrawVert& v3)
@@ -393,20 +448,21 @@ namespace
 			static_cast<int>(std::round(v3.pos.x)) - renderInfo.MinX, static_cast<int>(std::round(v3.pos.y)) - renderInfo.MinY);
 		if (CurrentDevice->UniformColorTriangleCache.Contains(key))
 		{
-			DrawCachedTriangle(CurrentDevice->UniformColorTriangleCache.At(key), renderInfo);
+			const auto& cached = CurrentDevice->UniformColorTriangleCache.At(key);
+			DrawCachedTriangle(*cached, renderInfo);
 
 			return;
 		}
 
-		auto* cached = new Device::TriangleCacheItem();  // The memory is managed by the cache.
-		DrawTriangleWithColorFunction(renderInfo, [&color](float, float) { return color; }, cached);
+		auto cached = std::make_unique<Device::TriangleCacheItem>();
+		DrawTriangleWithColorFunction(renderInfo, [&color](float, float) { return color; }, cached.get());
 
 		if (!cached->Texture) return;
 
 		const SDL_Rect destination = { renderInfo.MinX, renderInfo.MinY, cached->Width, cached->Height };
 		SDL_RenderCopy(CurrentDevice->Renderer, cached->Texture, nullptr, &destination);
 
-		CurrentDevice->UniformColorTriangleCache.Insert(key, cached);
+		CurrentDevice->UniformColorTriangleCache.Insert(key, std::move(cached));
 	}
 
 	void DrawRectangle(const Rect& bounding, SDL_Texture* texture, int textureWidth, int textureHeight, const Color& color, bool doHorizontalFlip, bool doVerticalFlip)
