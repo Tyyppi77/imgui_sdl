@@ -569,10 +569,9 @@ namespace ImGuiSDL
 				const ImDrawCmd* drawCommand = &commandList->CmdBuffer[cmd_i];
 
 				const Device::ClipRect clipRect = {
-					static_cast<int>(drawCommand->ClipRect.x),
-					static_cast<int>(drawCommand->ClipRect.y),
-					static_cast<int>(drawCommand->ClipRect.z - drawCommand->ClipRect.x),
-					static_cast<int>(drawCommand->ClipRect.w - drawCommand->ClipRect.y)
+					0,0,
+					static_cast<int>(io.DisplaySize.x),
+					static_cast<int>(io.DisplaySize.y)
 				};
 				CurrentDevice->SetClipRect(clipRect);
 
