@@ -14,4 +14,4 @@ namespace ImGuiSDL
 	// Call this every frame after ImGui::Render with ImGui::GetDrawData(). This will use the SDL_Renderer provided to the interfrace with Initialize
 	// to draw the contents of the draw data to the screen.
 	void Render(ImDrawData* drawData);
-};
+}
