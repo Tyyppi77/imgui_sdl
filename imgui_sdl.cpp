@@ -556,6 +556,15 @@ namespace ImGuiSDL
 		SDL_GetRenderDrawBlendMode(CurrentDevice->Renderer, &blendMode);
 		SDL_SetRenderDrawBlendMode(CurrentDevice->Renderer, SDL_BLENDMODE_BLEND);
 
+		Uint8 initialR, initialG, initialB, initialA;
+		SDL_GetRenderDrawColor(CurrentDevice->Renderer, &initialR, &initialG, &initialB, &initialA);
+
+		SDL_bool initialClipEnabled = SDL_RenderIsClipEnabled(CurrentDevice->Renderer);
+		SDL_Rect initialClipRect;
+		SDL_RenderGetClipRect(CurrentDevice->Renderer, &initialClipRect);
+
+		SDL_Texture* initialRenderTarget = SDL_GetRenderTarget(CurrentDevice->Renderer);
+
 		ImGuiIO& io = ImGui::GetIO();
 
 		for (int n = 0; n < drawData->CmdListsCount; n++)
@@ -654,6 +663,13 @@ namespace ImGuiSDL
 		}
 
 		CurrentDevice->DisableClip();
+
+		SDL_SetRenderTarget(CurrentDevice->Renderer, initialRenderTarget);
+
+		SDL_RenderSetClipRect(CurrentDevice->Renderer, initialClipEnabled ? &initialClipRect : nullptr);
+
+		SDL_SetRenderDrawColor(CurrentDevice->Renderer,
+			initialR, initialG, initialB, initialA);
 
 		SDL_SetRenderDrawBlendMode(CurrentDevice->Renderer, blendMode);
 	}
