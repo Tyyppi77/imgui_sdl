@@ -39,6 +39,8 @@ int main()
 				{
 					io.DisplaySize.x = static_cast<float>(e.window.data1);
 					io.DisplaySize.y = static_cast<float>(e.window.data2);
+
+					ImGuiSDL::Reset();
 				}
 			}
 			else if (e.type == SDL_MOUSEWHEEL)

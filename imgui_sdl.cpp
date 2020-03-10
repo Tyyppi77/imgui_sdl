@@ -93,6 +93,13 @@ namespace
 
 			Clean();
 		}
+
+		void Clear()
+		{
+			Order.clear();
+			Container.clear();
+		}
+
 	private:
 		void Clean()
 		{
@@ -672,5 +679,11 @@ namespace ImGuiSDL
 			initialR, initialG, initialB, initialA);
 
 		SDL_SetRenderDrawBlendMode(CurrentDevice->Renderer, blendMode);
+	}
+
+	void Reset()
+	{
+		CurrentDevice->UniformColorTriangleCache.Clear();
+		CurrentDevice->GenericTriangleCache.Clear();
 	}
 }
