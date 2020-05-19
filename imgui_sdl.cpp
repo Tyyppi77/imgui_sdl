@@ -123,19 +123,22 @@ namespace
 
 		uint32_t ToInt() const
 		{
-			return	((static_cast<int>(R * 255) & 0xff) << 0)
-				  | ((static_cast<int>(G * 255) & 0xff) << 8)
-				  | ((static_cast<int>(B * 255) & 0xff) << 16)
-				  | ((static_cast<int>(A * 255) & 0xff) << 24);
+			const int r = std::max(std::min(static_cast<int>(R * 255), 255), 0);
+			const int g = std::max(std::min(static_cast<int>(G * 255), 255), 0);
+			const int b = std::max(std::min(static_cast<int>(B * 255), 255), 0);
+			const int a = std::max(std::min(static_cast<int>(A * 255), 255), 0);
+
+			return (r << 0) | (g << 8) | (b << 16) | (a << 24);
 		}
 
 		void UseAsDrawColor(SDL_Renderer* renderer) const
 		{
-			SDL_SetRenderDrawColor(renderer,
-				static_cast<uint8_t>(R * 255),
-				static_cast<uint8_t>(G * 255),
-				static_cast<uint8_t>(B * 255),
-				static_cast<uint8_t>(A * 255));
+			const int r = std::max(std::min(static_cast<int>(R * 255), 255), 0);
+			const int g = std::max(std::min(static_cast<int>(G * 255), 255), 0);
+			const int b = std::max(std::min(static_cast<int>(B * 255), 255), 0);
+			const int a = std::max(std::min(static_cast<int>(A * 255), 255), 0);
+
+			SDL_SetRenderDrawColor(renderer, static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b), static_cast<uint8_t>(a));
 		}
 	};
 
@@ -495,7 +498,11 @@ namespace
 
 			const SDL_RendererFlip flip = static_cast<SDL_RendererFlip>((doHorizontalFlip ? SDL_FLIP_HORIZONTAL : 0) | (doVerticalFlip ? SDL_FLIP_VERTICAL : 0));
 
-			SDL_SetTextureColorMod(texture, static_cast<uint8_t>(color.R * 255), static_cast<uint8_t>(color.G * 255), static_cast<uint8_t>(color.B * 255));
+			const int r = std::max(std::min(static_cast<int>(color.R * 255), 255), 0);
+			const int g = std::max(std::min(static_cast<int>(color.G * 255), 255), 0);
+			const int b = std::max(std::min(static_cast<int>(color.B * 255), 255), 0);
+
+			SDL_SetTextureColorMod(texture, static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b));
 			SDL_RenderCopyEx(CurrentDevice->Renderer, texture, &source, &destination, 0.0, nullptr, flip);
 		}
 	}
