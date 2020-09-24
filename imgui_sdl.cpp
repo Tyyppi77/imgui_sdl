@@ -327,19 +327,6 @@ namespace
 		const Sint32 b2 = (f1x - f3x) * 16;
 		const Sint32 b3 = (f2x - f1x) * 16;
 
-		bool isUniformColor = false;
-		SDL_Point pointsbuffer[1024];
-		int points_i = 0;
-		if (!texture && v1.col == v2.col && v1.col == v3.col) {
-			isUniformColor = true;
-			SDL_SetRenderDrawColor(CurrentDevice->Renderer,
-				Color(v1.col).R * 255,
-				Color(v1.col).G * 255,
-				Color(v1.col).B * 255,
-				Color(v1.col).A * 255
-			);
-		}
-
 		// Save the original texture color and alpha mod here, since we change it
 		// according to vertex attributes and need to return it to its original state
 		// afterwards.
@@ -377,6 +364,23 @@ namespace
 		const float v3u = v3.uv.x * texture_width / normalization;
 		const float v3v = v3.uv.y * texture_height / normalization;
 
+		// If the triangle is uniformly-colored, we can get a big speed up by setting
+		// the color once and drawing batches of rows, rather than drawing individually
+		// colored pixels. Avoid malloc and a dynamic buffer size since it's slower
+		// than just grabbing space from the stack.
+		bool isUniformColor = false;
+		SDL_Rect rectsbuffer[1024];
+		int rects_i = 0;
+		if (!texture && v1.col == v2.col && v1.col == v3.col) {
+			isUniformColor = true;
+			SDL_SetRenderDrawColor(CurrentDevice->Renderer,
+				Color(v1.col).R * 255,
+				Color(v1.col).G * 255,
+				Color(v1.col).B * 255,
+				Color(v1.col).A * 255
+			);
+		}
+
 		// Iterate over all pixels in the bounding box.
 		for (int y = minYf / 16; y <= maxYf / 16; y++) {
 			// Stash barycentric coordinates at start of row
@@ -384,22 +388,22 @@ namespace
 			Sint32 w2_row = w2;
 			Sint32 w3_row = w3;
 
+			// Keep track of where the triangle starts on this row, as an optimization
+			// to draw uniformly-colored triangles.
+			bool in_triangle = false;
+			int x_start;
+
 			for (int x = minXf / 16; x <= maxXf / 16; x++) {
 				// If all barycentric coordinates are positive, we're inside the triangle
 				if (w1 >= 0 && w2 >= 0 && w3 >= 0) {
+					if (!in_triangle) {
+						// We draw uniformly-colored triangles row by row, so we need to keep
+						// track of where the row starts and know when it ends.
+						x_start = x;
+						in_triangle = true;
+					}
 
-					if (isUniformColor) {
-						// For triangles of uniform color, store points so we can send them
-						// to the renderer in batches. This provides a huge speedup in most
-						// cases (even with SDL 2.0.10's built-in batching!).
-						pointsbuffer[points_i].x = x;
-						pointsbuffer[points_i].y = y;
-						points_i++;
-						if (points_i == 1024) {
-							SDL_RenderDrawPoints(CurrentDevice->Renderer, pointsbuffer, points_i);
-							points_i = 0;
-						}
-					} else {
+					if (!isUniformColor) {
 						// Interpolate color
 						const Uint8 r = col1r * w1 + col2r * w2 + col3r * w3;
 						const Uint8 g = col1g * w1 + col2g * w2 + col3g * w3;
@@ -432,6 +436,24 @@ namespace
 							SDL_RenderCopy(CurrentDevice->Renderer, texture, &srcrect, &destrect);
 						}
 					}
+				} else if (in_triangle) {
+					// No longer in triangle, so we're done with this row.
+					if (isUniformColor) {
+						// For uniformly-colored triangles, store lines so we can send them
+						// to the renderer in batches. This provides a huge speedup in most
+						// cases (even with SDL 2.0.10's built-in batching!).
+						rectsbuffer[rects_i].x = x_start;
+						rectsbuffer[rects_i].y = y;
+						rectsbuffer[rects_i].w = x - x_start;
+						rectsbuffer[rects_i].h = 1;
+						rects_i++;
+						if (rects_i == 1024) {
+							SDL_RenderFillRects(CurrentDevice->Renderer, rectsbuffer, rects_i);
+							rects_i = 0;
+						}
+					}
+
+					break;
 				}
 
 				// Increment barycentric coordinates one pixel rightwards
@@ -446,7 +468,7 @@ namespace
 		}
 
 		if (isUniformColor) {
-			SDL_RenderDrawPoints(CurrentDevice->Renderer, pointsbuffer, points_i);
+			SDL_RenderFillRects(CurrentDevice->Renderer, rectsbuffer, rects_i);
 		}
 
 		// Restore original texture color and alpha mod.
