@@ -264,8 +264,8 @@ namespace
 		// bounding box with respect to the center of the bounding box. We add a
 		// half-pixel on each axis to match hardware renderers, which evaluate at the
 		// center of pixels.
-		Sint32 px = minXf - meanXf + 8;
-		Sint32 py = minYf - meanYf + 8;
+		const Sint32 px = minXf - meanXf + 8;
+		const Sint32 py = minYf - meanYf + 8;
 
 		// Calculate barycentric coordinates at starting position. Barycentric
 		// coordinates tell us the position of a point with respect to the
@@ -327,6 +327,19 @@ namespace
 		const Sint32 b2 = (f1x - f3x) * 16;
 		const Sint32 b3 = (f2x - f1x) * 16;
 
+		bool isUniformColor = false;
+		SDL_Point pointsbuffer[1024];
+		int points_i = 0;
+		if (!texture && v1.col == v2.col && v1.col == v3.col) {
+			isUniformColor = true;
+			SDL_SetRenderDrawColor(CurrentDevice->Renderer,
+				Color(v1.col).R * 255,
+				Color(v1.col).G * 255,
+				Color(v1.col).B * 255,
+				Color(v1.col).A * 255
+			);
+		}
+
 		// Save the original texture color and alpha mod here, since we change it
 		// according to vertex attributes and need to return it to its original state
 		// afterwards.
@@ -342,6 +355,28 @@ namespace
 			SDL_QueryTexture(texture, NULL, NULL, &texture_width, &texture_height);
 		}
 
+		// Precalculate normalized vertex attributes. We just need to multiply these
+		// by the barycentric coordinates and sum them to get the interpolated vertex
+		// attribute for any point. This can save a few frames per second.
+		const float col1r = Color(v1.col).R * 255 / normalization;
+		const float col1g = Color(v1.col).G * 255 / normalization;
+		const float col1b = Color(v1.col).B * 255 / normalization;
+		const float col1a = Color(v1.col).A * 255 / normalization;
+		const float col2r = Color(v2.col).R * 255 / normalization;
+		const float col2g = Color(v2.col).G * 255 / normalization;
+		const float col2b = Color(v2.col).B * 255 / normalization;
+		const float col2a = Color(v2.col).A * 255 / normalization;
+		const float col3r = Color(v3.col).R * 255 / normalization;
+		const float col3g = Color(v3.col).G * 255 / normalization;
+		const float col3b = Color(v3.col).B * 255 / normalization;
+		const float col3a = Color(v3.col).A * 255 / normalization;
+		const float v1u = v1.uv.x * texture_width / normalization;
+		const float v1v = v1.uv.y * texture_height / normalization;
+		const float v2u = v2.uv.x * texture_width / normalization;
+		const float v2v = v2.uv.y * texture_height / normalization;
+		const float v3u = v3.uv.x * texture_width / normalization;
+		const float v3v = v3.uv.y * texture_height / normalization;
+
 		// Iterate over all pixels in the bounding box.
 		for (int y = minYf / 16; y <= maxYf / 16; y++) {
 			// Stash barycentric coordinates at start of row
@@ -353,41 +388,49 @@ namespace
 				// If all barycentric coordinates are positive, we're inside the triangle
 				if (w1 >= 0 && w2 >= 0 && w3 >= 0) {
 
-					// Calculate normalized barycentric coordinates to use as interpolation
-					// weights
-					float l1 = w1 / normalization;
-					float l2 = w2 / normalization;
-					float l3 = w3 / normalization;
-
-					Uint8 r = Color(v1.col).R * l1 * 255 + Color(v2.col).R * l2 * 255 + Color(v3.col).R * l3 * 255;
-					Uint8 g = Color(v1.col).G * l1 * 255 + Color(v2.col).G * l2 * 255 + Color(v3.col).G * l3 * 255;
-					Uint8 b = Color(v1.col).B * l1 * 255 + Color(v2.col).B * l2 * 255 + Color(v3.col).B * l3 * 255;
-					Uint8 a = Color(v1.col).A * l1 * 255 + Color(v2.col).A * l2 * 255 + Color(v3.col).A * l3 * 255;
-
-					if (texture) {
-						// Copy a pixel from the source texture to the target pixel. This
-						// effectively does nearest neighbor sampling. Could probably be
-						// extended to copy from a larger rect to do bilinear sampling if
-						// needed.
-						const float u = v1.uv.x * l1 + v2.uv.x * l2 + v3.uv.x * l3;
-						const float v = v1.uv.y * l1 + v2.uv.y * l2 + v3.uv.y * l3;
-						SDL_SetTextureColorMod(texture, r, g, b);
-						SDL_SetTextureAlphaMod(texture, a);
-						SDL_Rect srcrect;
-						srcrect.x = u * texture_width;
-						srcrect.y = v * texture_height;
-						srcrect.w = 1;
-						srcrect.h = 1;
-						SDL_Rect destrect;
-						destrect.x = x;
-						destrect.y = y;
-						destrect.w = 1;
-						destrect.h = 1;
-						SDL_RenderCopy(CurrentDevice->Renderer, texture, &srcrect, &destrect);
+					if (isUniformColor) {
+						// For triangles of uniform color, store points so we can send them
+						// to the renderer in batches. This provides a huge speedup in most
+						// cases (even with SDL 2.0.10's built-in batching!).
+						pointsbuffer[points_i].x = x;
+						pointsbuffer[points_i].y = y;
+						points_i++;
+						if (points_i == 1024) {
+							SDL_RenderDrawPoints(CurrentDevice->Renderer, pointsbuffer, points_i);
+							points_i = 0;
+						}
 					} else {
-						// Draw a single colored pixel
-						SDL_SetRenderDrawColor(CurrentDevice->Renderer, r, g, b, a);
-						SDL_RenderDrawPoint(CurrentDevice->Renderer, x, y);
+						// Interpolate color
+						const Uint8 r = col1r * w1 + col2r * w2 + col3r * w3;
+						const Uint8 g = col1g * w1 + col2g * w2 + col3g * w3;
+						const Uint8 b = col1b * w1 + col2b * w2 + col3b * w3;
+						const Uint8 a = col1a * w1 + col2a * w2 + col3a * w3;
+
+						if (!texture) {
+							// Draw a single colored pixel
+							SDL_SetRenderDrawColor(CurrentDevice->Renderer, r, g, b, a);
+							SDL_RenderDrawPoint(CurrentDevice->Renderer, x, y);
+						} else {
+							// Copy a pixel from the source texture to the target pixel. This
+							// effectively does nearest neighbor sampling. Could probably be
+							// extended to copy from a larger rect to do bilinear sampling if
+							// needed.
+							const int u = v1u * w1 + v2u * w2 + v3u * w3;
+							const int v = v1v * w1 + v2v * w2 + v3v * w3;
+							SDL_SetTextureColorMod(texture, r, g, b);
+							SDL_SetTextureAlphaMod(texture, a);
+							SDL_Rect srcrect;
+							srcrect.x = u;
+							srcrect.y = v;
+							srcrect.w = 1;
+							srcrect.h = 1;
+							SDL_Rect destrect;
+							destrect.x = x;
+							destrect.y = y;
+							destrect.w = 1;
+							destrect.h = 1;
+							SDL_RenderCopy(CurrentDevice->Renderer, texture, &srcrect, &destrect);
+						}
 					}
 				}
 
@@ -400,6 +443,10 @@ namespace
 			w1 = w1_row + b1;
 			w2 = w2_row + b2;
 			w3 = w3_row + b3;
+		}
+
+		if (isUniformColor) {
+			SDL_RenderDrawPoints(CurrentDevice->Renderer, pointsbuffer, points_i);
 		}
 
 		// Restore original texture color and alpha mod.
