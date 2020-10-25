@@ -457,6 +457,12 @@ namespace ImGuiSDL
 		ImGui::GetStyle().WindowRounding = 0.0f;
 		ImGui::GetStyle().AntiAliasedFill = false;
 		ImGui::GetStyle().AntiAliasedLines = false;
+		ImGui::GetStyle().ChildRounding = 0.0f;
+		ImGui::GetStyle().PopupRounding = 0.0f;
+		ImGui::GetStyle().FrameRounding = 0.0f;
+		ImGui::GetStyle().ScrollbarRounding = 0.0f;
+		ImGui::GetStyle().GrabRounding = 0.0f;
+		ImGui::GetStyle().TabRounding = 0.0f;
 
 		// Loads the font texture.
 		unsigned char* pixels;
