@@ -62,9 +62,11 @@ namespace
 		};
 	}
 
-	template <typename Key, typename Value, std::size_t Size> class LRUCache
+	template <typename Key, typename Value> class LRUCache
 	{
 	public:
+		void SetCapacity(size_t capacity) { Capacity = capacity; }
+
 		bool Contains(const Key& key) const
 		{
 			return Container.find(key) != Container.end();
@@ -90,13 +92,11 @@ namespace
 
 			Order.push_front(std::make_pair(key, std::move(value)));
 			Container.insert(std::make_pair(key, Order.begin()));
-
-			Clean();
 		}
-	private:
+
 		void Clean()
 		{
-			while (Container.size() > Size)
+			while (Container.size() > Capacity)
 			{
 				auto last = Order.end();
 				last--;
@@ -105,6 +105,8 @@ namespace
 			}
 		}
 
+	private:
+		size_t Capacity = 0;
 		std::list<std::pair<Key, Value>> Order;
 		std::unordered_map<Key, decltype(Order.begin()), TupleHash::Hash<Key>> Container;
 	};
@@ -156,15 +158,12 @@ namespace
 			~TriangleCacheItem() { if (Texture) SDL_DestroyTexture(Texture); }
 		};
 
-		// You can tweak these to values that you find that work the best.
-		static constexpr std::size_t TriangleCacheSize = 2048;
-
 		// The triangle cache has to be basically a full representation of the triangle.
 		// This includes the (offset) vertex positions, texture coordinates and vertex colors.
 		using GenericTriangleVertexKey = std::tuple<float, float, float, float, uint32_t>;
 		using GenericTriangleKey = std::tuple<GenericTriangleVertexKey, GenericTriangleVertexKey, GenericTriangleVertexKey, SDL_Texture*>;
 
-		LRUCache<GenericTriangleKey, std::unique_ptr<TriangleCacheItem>, TriangleCacheSize> TriangleCache;
+		LRUCache<GenericTriangleKey, std::unique_ptr<TriangleCacheItem>> TriangleCache;
 
 		Device(SDL_Renderer* renderer) : Renderer(renderer) { }
 
@@ -557,6 +556,8 @@ namespace ImGuiSDL
 
 	void Render(ImDrawData* drawData)
 	{
+		size_t num_triangles = 0;
+
 		SDL_BlendMode blendMode;
 		SDL_GetRenderDrawBlendMode(CurrentDevice->Renderer, &blendMode);
 		SDL_SetRenderDrawBlendMode(CurrentDevice->Renderer, SDL_BLENDMODE_BLEND);
@@ -599,6 +600,7 @@ namespace ImGuiSDL
 					// Loops over triangles.
 					for (unsigned int i = 0; i + 3 <= drawCommand->ElemCount; i += 3)
 					{
+						num_triangles++;
 						ImDrawVert v0 = vertexBuffer[indexBuffer[i + 0]];
 						ImDrawVert v1 = vertexBuffer[indexBuffer[i + 1]];
 						ImDrawVert v2 = vertexBuffer[indexBuffer[i + 2]];
@@ -691,5 +693,8 @@ namespace ImGuiSDL
 			initialR, initialG, initialB, initialA);
 
 		SDL_SetRenderDrawBlendMode(CurrentDevice->Renderer, blendMode);
+
+		CurrentDevice->TriangleCache.SetCapacity(num_triangles);
+		CurrentDevice->TriangleCache.Clean();
 	}
 }
