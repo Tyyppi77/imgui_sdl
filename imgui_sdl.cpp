@@ -476,42 +476,6 @@ namespace
 			SDL_SetTextureAlphaMod(texture, original_mod_a);
 		}
 	}
-
-	void DrawRectangle(const Rect& bounding, SDL_Texture* texture, const Color& color, bool doHorizontalFlip, bool doVerticalFlip)
-	{
-		// We are safe to assume uniform color here, because the caller checks it and and uses the triangle renderer to render those.
-		const SDL_Rect destination = {
-			static_cast<int>(bounding.MinX),
-			static_cast<int>(bounding.MinY),
-			static_cast<int>(bounding.MaxX - bounding.MinX),
-			static_cast<int>(bounding.MaxY - bounding.MinY)
-		};
-
-		if (texture)
-		{
-			// We can now just calculate the correct source rectangle and draw it.
-			int textureWidth = 0, textureHeight = 0;
-			SDL_QueryTexture(texture, nullptr, nullptr, &textureWidth, &textureHeight);
-
-			const SDL_Rect source = {
-				static_cast<int>(bounding.MinU * textureWidth),
-				static_cast<int>(bounding.MinV * textureHeight),
-				static_cast<int>((bounding.MaxU - bounding.MinU) * textureWidth),
-				static_cast<int>((bounding.MaxV - bounding.MinV) * textureHeight)
-			};
-
-			const SDL_RendererFlip flip = static_cast<SDL_RendererFlip>((doHorizontalFlip ? SDL_FLIP_HORIZONTAL : 0) | (doVerticalFlip ? SDL_FLIP_VERTICAL : 0));
-
-			SDL_SetTextureColorMod(texture, static_cast<uint8_t>(color.R * 255), static_cast<uint8_t>(color.G * 255), static_cast<uint8_t>(color.B * 255));
-			SDL_RenderCopyEx(CurrentDevice->Renderer, texture, &source, &destination, 0.0, nullptr, flip);
-		}
-		else
-		{
-			// If the area isn't textured, we can just draw a rectangle with the correct color.
-			color.UseAsDrawColor(CurrentDevice->Renderer);
-			SDL_RenderFillRect(CurrentDevice->Renderer, &destination);
-		}
-	}
 }
 
 namespace ImGuiSDL
@@ -606,44 +570,10 @@ namespace ImGuiSDL
 						ImDrawVert v2 = vertexBuffer[indexBuffer[i + 2]];
 
 						const Rect bounding = Rect::CalculateBoundingBox(v0, v1, v2);
-
 						const bool isTriangleUniformColor = v0.col == v1.col && v1.col == v2.col;
 						const bool doesTriangleUseOnlyColor = bounding.UsesOnlyColor();
 
 						SDL_Texture *texture = doesTriangleUseOnlyColor ? nullptr : (SDL_Texture*)drawCommand->TextureId;
-
-						// Actually, since we render a whole bunch of rectangles, we try to first detect those, and render them more efficiently.
-						// How are rectangles detected? It's actually pretty simple: If all 6 vertices lie on the extremes of the bounding box,
-						// it's a rectangle.
-						if (i + 6 <= drawCommand->ElemCount)
-						{
-							ImDrawVert v3 = vertexBuffer[indexBuffer[i + 3]];
-							ImDrawVert v4 = vertexBuffer[indexBuffer[i + 4]];
-							ImDrawVert v5 = vertexBuffer[indexBuffer[i + 5]];
-
-							const bool isUniformColor = isTriangleUniformColor && v2.col == v3.col && v3.col == v4.col && v4.col == v5.col;
-
-							if (isUniformColor
-								&& bounding.IsOnExtreme(v0.pos)
-								&& bounding.IsOnExtreme(v1.pos)
-								&& bounding.IsOnExtreme(v2.pos)
-								&& bounding.IsOnExtreme(v3.pos)
-								&& bounding.IsOnExtreme(v4.pos)
-								&& bounding.IsOnExtreme(v5.pos))
-							{
-								// ImGui gives the triangles in a nice order: the first vertex happens to be the topleft corner of our rectangle.
-								// We need to check for the orientation of the texture, as I believe in theory ImGui could feed us a flipped texture,
-								// so that the larger texture coordinates are at topleft instead of bottomright.
-								// We don't consider equal texture coordinates to require a flip, as then the rectangle is mostlikely simply a colored rectangle.
-								const bool doHorizontalFlip = v2.uv.x < v0.uv.x;
-								const bool doVerticalFlip = v2.uv.y < v0.uv.y;
-
-								DrawRectangle(bounding, texture, Color(v0.col), doHorizontalFlip, doVerticalFlip);
-
-								i += 3;  // Additional increment to account for the extra 3 vertices we consumed.
-								continue;
-							}
-						}
 
 						// First we check if there is a cached version of this triangle already waiting for us. If so, we can just do a super fast texture copy.
 						v0.pos.x -= (int)bounding.MinX; v0.pos.y -= (int)bounding.MinY;
