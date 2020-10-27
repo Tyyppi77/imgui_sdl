@@ -668,8 +668,10 @@ namespace ImGuiSDL
 							cached->Texture = CurrentDevice->MakeTexture(cached->Width, cached->Height);
 
 							CurrentDevice->UseAsRenderTarget(cached->Texture);
+							SDL_SetRenderDrawBlendMode(CurrentDevice->Renderer, SDL_BLENDMODE_NONE);
 							DrawTriangle(v0, v1, v2, texture);
 							CurrentDevice->UseAsRenderTarget(initialRenderTarget);
+							SDL_SetRenderDrawBlendMode(CurrentDevice->Renderer, SDL_BLENDMODE_BLEND);
 
 							const SDL_Rect destination = { (int)bounding.MinX, (int)bounding.MinY, (int)cached->Width, (int)cached->Height };
 							SDL_RenderCopy(CurrentDevice->Renderer, cached->Texture, nullptr, &destination);
