@@ -309,9 +309,12 @@ namespace
 		// and greater-or-equal-than, but since we're in fixed point space where
 		// everything is an integer we instead add a bias to each barycentric
 		// coordinate corresponding to a non-top, non-left edge.
-		w1 += ((f3y == f2y && f3x > f2x) || f3x < f2x) ? 0 : -1;
-		w2 += ((f3y == f1y && f1x > f3x) || f1x < f3x) ? 0 : -1;
-		w3 += ((f2y == f1y && f2x > f1x) || f2x < f1x) ? 0 : -1;
+		const int bias1 = ((f3y == f2y && f3x > f2x) || f3x < f2x) ? 0 : -1;
+		const int bias2 = ((f3y == f1y && f1x > f3x) || f1x < f3x) ? 0 : -1;
+		const int bias3 = ((f2y == f1y && f2x > f1x) || f2x < f1x) ? 0 : -1;
+		w1 += bias1;
+		w2 += bias2;
+		w3 += bias3;
 
 		// As we go through each pixel, we use the barycentric coordinates to check
 		// if they're covered by the triangle. We could recalculate them every time,
@@ -403,11 +406,17 @@ namespace
 					}
 
 					if (!isUniformColor) {
+						// Fix the adjustment due to fill rule. It's incorrect when calculating
+						// interpolation values.
+						const Sint32 alpha = w1 - bias1;
+						const Sint32 beta = w2 - bias2;
+						const Sint32 gamma = w3 - bias3;
+
 						// Interpolate color
-						const Uint8 r = col1r * w1 + col2r * w2 + col3r * w3;
-						const Uint8 g = col1g * w1 + col2g * w2 + col3g * w3;
-						const Uint8 b = col1b * w1 + col2b * w2 + col3b * w3;
-						const Uint8 a = col1a * w1 + col2a * w2 + col3a * w3;
+						const Uint8 r = col1r * alpha + col2r * beta + col3r * gamma;
+						const Uint8 g = col1g * alpha + col2g * beta + col3g * gamma;
+						const Uint8 b = col1b * alpha + col2b * beta + col3b * gamma;
+						const Uint8 a = col1a * alpha + col2a * beta + col3a * gamma;
 
 						if (!texture) {
 							// Draw a single colored pixel
@@ -418,8 +427,8 @@ namespace
 							// effectively does nearest neighbor sampling. Could probably be
 							// extended to copy from a larger rect to do bilinear sampling if
 							// needed.
-							const int u = v1u * w1 + v2u * w2 + v3u * w3;
-							const int v = v1v * w1 + v2v * w2 + v3v * w3;
+							const int u = v1u * alpha + v2u * beta + v3u * gamma;
+							const int v = v1v * alpha + v2v * beta + v3v * gamma;
 							SDL_SetTextureColorMod(texture, r, g, b);
 							SDL_SetTextureAlphaMod(texture, a);
 							SDL_Rect srcrect;
