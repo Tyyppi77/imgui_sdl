@@ -582,6 +582,13 @@ namespace ImGuiSDL
 						const bool isTriangleUniformColor = v0.col == v1.col && v1.col == v2.col;
 						const bool doesTriangleUseOnlyColor = bounding.UsesOnlyColor();
 
+						if ((bounding.MinX > clipRect.X + clipRect.Width || bounding.MaxX < clipRect.X)
+							&& (bounding.MinY > clipRect.Y + clipRect.Height || bounding.MaxY < clipRect.Y)
+						) {
+							// Not in clip rect, ignore
+							continue;
+						}
+
 						SDL_Texture *texture = doesTriangleUseOnlyColor ? nullptr : (SDL_Texture*)drawCommand->TextureId;
 
 						// First we check if there is a cached version of this triangle already waiting for us. If so, we can just do a super fast texture copy.
