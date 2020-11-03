@@ -94,6 +94,12 @@ namespace
 			Container.insert(std::make_pair(key, Order.begin()));
 		}
 
+		void Reset()
+		{
+			Order.clear();
+			Container.clear();
+		}
+
 		void Clean()
 		{
 			while (Container.size() > Capacity)
@@ -144,6 +150,7 @@ namespace
 	struct Device
 	{
 		SDL_Renderer* Renderer;
+		bool CacheWasInvalidated = false;
 
 		struct ClipRect
 		{
@@ -489,6 +496,13 @@ namespace
 
 namespace ImGuiSDL
 {
+	static int ImGuiSDLEventWatch(void *userdata, SDL_Event *event) {
+		if (event->type == SDL_RENDER_TARGETS_RESET) {
+			CurrentDevice->CacheWasInvalidated = true;
+		}
+		return 0;
+	}
+
 	void Initialize(SDL_Renderer* renderer, int windowWidth, int windowHeight)
 	{
 		ImGuiIO& io = ImGui::GetIO();
@@ -515,6 +529,7 @@ namespace ImGuiSDL
 		SDL_FreeSurface(surface);
 
 		CurrentDevice = new Device(renderer);
+		SDL_AddEventWatch(ImGuiSDLEventWatch, nullptr);
 	}
 
 	void Deinitialize()
@@ -525,10 +540,16 @@ namespace ImGuiSDL
 		SDL_DestroyTexture(texture);
 
 		delete CurrentDevice;
+		SDL_DelEventWatch(ImGuiSDLEventWatch, nullptr);
 	}
 
 	void Render(ImDrawData* drawData)
 	{
+		if (CurrentDevice->CacheWasInvalidated) {
+			CurrentDevice->CacheWasInvalidated = false;
+			CurrentDevice->TriangleCache.Reset();
+		}
+
 		size_t num_triangles = 0;
 
 		SDL_BlendMode blendMode;
