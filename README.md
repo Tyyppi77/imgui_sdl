@@ -1,6 +1,8 @@
 # NOTE
 
-Consider using a regular `_dx11` or `_opengl3` renderer (change depending on platform) from the official Dear ImGui backends, they work with SDL and will be much much faster and accurate than this essentially software based implementation which suffers from rendering artifacts and performance issues.
+SDL 2.0.18 added `SDL_RenderGeometry` and Dear ImGui 1.85 has an `SDL_Renderer` dedicated backend, so starting from SDL 2.0.18 and Dear ImGui 1.85v you should have no reason to use this! You will get a much better experience using a properly hardware accelerated rendering implementation and a backend from the Dear ImGui repository itself. For this reason this repository is archived.
+
+Alternatively if you cannot for some reason update, consider using a regular `_dx11` or `_opengl3` renderer (change depending on platform) from the official Dear ImGui backends, they work with SDL and will be much much faster and accurate than this essentially software based implementation which suffers from rendering artifacts and performance issues.
 
 # imgui_sdl
 
